@@ -4,7 +4,7 @@ import { DoctorsService } from '@/lib/services/doctors.service';
 import { BookingsService } from '@/lib/services/bookings.service';
 import { getDb } from '@/lib/db';
 import { assignments, doctorHospitalAffiliations, subscriptions, subscriptionPlans, doctorPlanFeatures, doctorAssignmentUsage, assignmentPayments, doctorAvailability, patients, hospitals } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, sql, count, gte, asc } from 'drizzle-orm';
+import { eq, and, sql, count, gte, asc, lte, gt } from 'drizzle-orm';
 import { getMaxAssignmentsForDoctor } from '@/lib/config/subscription-limits';
 
 /**
@@ -337,6 +337,7 @@ async function getHandler(req: NextRequest) {
     let subscriptionUsage = null;
     const subscriptionResult = await db
       .select({
+        id: subscriptions.id,
         planId: subscriptions.planId,
         status: subscriptions.status,
       })
@@ -363,15 +364,16 @@ async function getHandler(req: NextRequest) {
       const maxAssignments = planFeaturesResult[0]?.maxAssignments ?? null;
       const maxAffiliations = planFeaturesResult[0]?.maxAffiliations ?? null;
 
-      // Get current month assignment usage
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      // Get current period assignment usage by subscription period
       const assignmentUsageResult = await db
         .select()
         .from(doctorAssignmentUsage)
         .where(
           and(
             eq(doctorAssignmentUsage.doctorId, doctorId),
-            eq(doctorAssignmentUsage.month, currentMonth)
+            eq(doctorAssignmentUsage.subscriptionId, subscriptionResult[0].id),
+            lte(doctorAssignmentUsage.periodStart, sql`NOW()`),
+            gt(doctorAssignmentUsage.periodEnd, sql`NOW()`)
           )
         )
         .limit(1);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { doctors, subscriptions, subscriptionPlans, doctorPlanFeatures, doctorAssignmentUsage } from '@/src/db/drizzle/migrations/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lte, gt, sql } from 'drizzle-orm';
 import { getMaxAssignmentsForDoctor, DEFAULT_ASSIGNMENT_LIMIT } from '@/lib/config/subscription-limits';
 
 /**
@@ -46,8 +46,6 @@ export async function GET(
     const doctorId = params.id;
     const db = getDb();
 
-    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
-
     // Get doctor's userId
     const doctor = await db
       .select({ userId: doctors.userId })
@@ -86,23 +84,38 @@ export async function GET(
       ? subscription[0].plan.name 
       : 'Free Plan';
 
-    // Get usage record
-    const usage = await db
-      .select()
-      .from(doctorAssignmentUsage)
+    // Get current period usage record via subscription period
+    const activeSub = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
       .where(
         and(
-          eq(doctorAssignmentUsage.doctorId, doctorId),
-          eq(doctorAssignmentUsage.month, currentMonth)
+          eq(subscriptions.userId, doctor[0].userId),
+          eq(subscriptions.status, 'active')
         )
       )
       .limit(1);
 
-    const usageData = usage.length > 0 ? usage[0] : {
-      count: 0,
-      limitCount: maxAssignments,
-      month: currentMonth,
-    };
+    let usageData: any = { count: 0, limitCount: maxAssignments, periodEnd: null };
+
+    if (activeSub.length > 0) {
+      const usage = await db
+        .select()
+        .from(doctorAssignmentUsage)
+        .where(
+          and(
+            eq(doctorAssignmentUsage.doctorId, doctorId),
+            eq(doctorAssignmentUsage.subscriptionId, activeSub[0].id),
+            lte(doctorAssignmentUsage.periodStart, sql`NOW()`),
+            gt(doctorAssignmentUsage.periodEnd, sql`NOW()`)
+          )
+        )
+        .limit(1);
+
+      if (usage.length > 0) {
+        usageData = usage[0];
+      }
+    }
 
     // Calculate percentage (skip if unlimited)
     const percentage = maxAssignments === -1 
@@ -121,11 +134,9 @@ export async function GET(
       }
     }
 
-    // Calculate reset date (1st of next month)
-    const resetDate = new Date();
-    resetDate.setMonth(resetDate.getMonth() + 1);
-    resetDate.setDate(1);
-    resetDate.setHours(0, 0, 0, 0);
+    const resetDate = usageData.periodEnd
+      ? new Date(usageData.periodEnd).toISOString()
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
     return NextResponse.json({
       success: true,
@@ -134,7 +145,7 @@ export async function GET(
         limit: maxAssignments,
         percentage,
         status,
-        resetDate: resetDate.toISOString(),
+        resetDate,
         remaining: maxAssignments === -1 ? -1 : Math.max(0, maxAssignments - usageData.count),
         plan: planName,
       },

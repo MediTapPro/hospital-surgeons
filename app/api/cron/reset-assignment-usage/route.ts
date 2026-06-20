@@ -1,3 +1,12 @@
+/**
+ * DEPRECATED: This cron job is no longer needed.
+ * 
+ * Usage tracking is now subscription-cycle-aligned. Period records are created
+ * at subscription creation/upgrade time and auto-expire when period_end passes.
+ * No monthly reset is required. This endpoint is kept for backward compatibility
+ * during transition and will return a deprecation warning.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { doctors, hospitals, subscriptions, subscriptionPlans, doctorPlanFeatures, doctorAssignmentUsage, hospitalUsageTracking } from '@/src/db/drizzle/migrations/schema';

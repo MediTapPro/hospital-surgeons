@@ -578,22 +578,32 @@ export const availabilityTemplates = pgTable("availability_templates", {
 export const hospitalUsageTracking = pgTable("hospital_usage_tracking", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	hospitalId: uuid("hospital_id").notNull(),
+	subscriptionId: uuid("subscription_id"),
 	month: varchar({ length: 7 }).notNull(),
 	patientsCount: integer("patients_count").default(0).notNull(),
 	assignmentsCount: integer("assignments_count").default(0).notNull(),
 	patientsLimit: integer("patients_limit").notNull(),
 	assignmentsLimit: integer("assignments_limit").notNull(),
 	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
+	periodStart: timestamp("period_start", { mode: 'string' }),
+	periodEnd: timestamp("period_end", { mode: 'string' }),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
 	index("idx_hospital_usage_tracking_hospital_month").using("btree", table.hospitalId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("text_ops")),
+	index("idx_hut_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
+	index("idx_hut_period").using("btree", table.periodStart.asc().nullsLast().op("timestamp_ops"), table.periodEnd.asc().nullsLast().op("timestamp_ops")),
 	foreignKey({
 			columns: [table.hospitalId],
 			foreignColumns: [hospitals.id],
 			name: "hospital_usage_tracking_hospital_id_fkey"
 		}).onDelete("cascade"),
-	unique("hospital_usage_tracking_hospital_id_month_key").on(table.hospitalId, table.month),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "hospital_usage_tracking_subscription_id_fkey"
+		}).onDelete("cascade"),
+	unique("hospital_usage_tracking_sub_period_key").on(table.subscriptionId, table.periodStart),
 ]);
 
 export const hospitalDepartments = pgTable("hospital_departments", {
@@ -763,20 +773,30 @@ export const assignments = pgTable("assignments", {
 export const doctorAssignmentUsage = pgTable("doctor_assignment_usage", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	doctorId: uuid("doctor_id").notNull(),
+	subscriptionId: uuid("subscription_id"),
 	month: varchar({ length: 7 }).notNull(),
 	count: integer().default(0).notNull(),
 	limitCount: integer("limit_count").notNull(),
 	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
+	periodStart: timestamp("period_start", { mode: 'string' }),
+	periodEnd: timestamp("period_end", { mode: 'string' }),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
 	index("idx_doctor_assignment_usage_doctor_month").using("btree", table.doctorId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("text_ops")),
+	index("idx_dau_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
+	index("idx_dau_period").using("btree", table.periodStart.asc().nullsLast().op("timestamp_ops"), table.periodEnd.asc().nullsLast().op("timestamp_ops")),
 	foreignKey({
 			columns: [table.doctorId],
 			foreignColumns: [doctors.id],
 			name: "doctor_assignment_usage_doctor_id_fkey"
 		}).onDelete("cascade"),
-	unique("doctor_assignment_usage_doctor_id_month_key").on(table.doctorId, table.month),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "doctor_assignment_usage_subscription_id_fkey"
+		}).onDelete("cascade"),
+	unique("doctor_assignment_usage_sub_period_key").on(table.subscriptionId, table.periodStart),
 ]);
 
 export const enumPriority = pgTable("enum_priority", {

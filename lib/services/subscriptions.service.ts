@@ -1,7 +1,7 @@
 import { SubscriptionsRepository, CreateSubscriptionPlanData, CreateSubscriptionData, UpdateSubscriptionData, SubscriptionQuery } from '@/lib/repositories/subscriptions.repository';
 import { getDb } from '@/lib/db';
-import { subscriptions, planPricing } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, sql, lte } from 'drizzle-orm';
+import { subscriptions, planPricing, subscriptionPlans, doctors, hospitals, doctorAssignmentUsage, hospitalUsageTracking, doctorPlanFeatures, hospitalPlanFeatures } from '@/src/db/drizzle/migrations/schema';
+import { eq, and, sql, lte, gt } from 'drizzle-orm';
 
 export class SubscriptionsService {
   private repo = new SubscriptionsRepository();
@@ -141,7 +141,12 @@ export class SubscriptionsService {
           message: 'Invalid plan',
         };
       }
-      const subscription = await this.repo.create(dto);
+      const db = getDb();
+      let subscription: any;
+      await db.transaction(async (tx) => {
+        subscription = await this.repo.create(dto, tx);
+        await this.generateUsageRecords(subscription, tx);
+      });
       return {
         success: true,
         message: 'Subscription created successfully',
@@ -332,7 +337,7 @@ export class SubscriptionsService {
       const endDate = new Date();
       endDate.setMonth(endDate.getMonth() + (pricing.billingPeriodMonths || 1));
 
-      // Create new subscription and cancel old one atomically
+      // Create new subscription, cancel old one, and generate usage records atomically
       let newSubscription: any;
 
       await db.transaction(async (tx) => {
@@ -346,7 +351,6 @@ export class SubscriptionsService {
             startDate: startDate.toISOString(),
             endDate: endDate.toISOString(),
             autoRenew: true,
-            previousSubscriptionId: currentSub.id,
           })
           .returning()) as any[];
         newSubscription = created;
@@ -360,6 +364,8 @@ export class SubscriptionsService {
             cancellationReason: 'upgraded',
           })
           .where(eq(subscriptions.id, currentSub.id));
+
+        await this.generateUsageRecords(newSubscription, tx);
       });
 
       return {
@@ -590,7 +596,7 @@ export class SubscriptionsService {
           const endDate = new Date(startDate);
           endDate.setMonth(endDate.getMonth() + (pricing.billingPeriodMonths || 1));
 
-          // Create new subscription and expire old one atomically
+          // Create new subscription, expire old one, and generate usage records atomically
           let newSubscription: any;
 
           await db.transaction(async (tx) => {
@@ -604,7 +610,6 @@ export class SubscriptionsService {
                 startDate: startDate.toISOString(),
                 endDate: endDate.toISOString(),
                 autoRenew: true,
-                previousSubscriptionId: oldSub.id,
               })
               .returning()) as any[];
             newSubscription = created;
@@ -619,6 +624,8 @@ export class SubscriptionsService {
                 planChangeStatus: null,
               })
               .where(eq(subscriptions.id, oldSub.id));
+
+            await this.generateUsageRecords(newSubscription, tx);
           });
 
           results.push({
@@ -649,7 +656,98 @@ export class SubscriptionsService {
       };
     }
   }
+
+  private async generateUsageRecords(subscription: any, tx?: any) {
+    if (!subscription?.id || !subscription?.planId) return;
+
+    const db = tx || getDb();
+    const planResult = await db
+      .select({ userRole: subscriptionPlans.userRole })
+      .from(subscriptionPlans)
+      .where(eq(subscriptionPlans.id, subscription.planId))
+      .limit(1);
+
+    if (planResult.length === 0) return;
+    const userRole = planResult[0].userRole;
+
+    const billingMonths = subscription.billingPeriodMonths || 1;
+    const startDate = new Date(subscription.startDate);
+    const endDate = new Date(subscription.endDate);
+
+    let periodStart = new Date(startDate);
+
+    while (periodStart < endDate) {
+      let periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + billingMonths);
+      if (periodEnd > endDate) periodEnd = new Date(endDate);
+
+      if (userRole === 'doctor') {
+        const doctorResult = await db
+          .select({ id: doctors.id })
+          .from(doctors)
+          .where(eq(doctors.userId, subscription.userId))
+          .limit(1);
+
+        if (doctorResult.length > 0) {
+          const features = await db
+            .select({ maxAssignmentsPerMonth: doctorPlanFeatures.maxAssignmentsPerMonth })
+            .from(doctorPlanFeatures)
+            .where(eq(doctorPlanFeatures.planId, subscription.planId))
+            .limit(1);
+
+          const limitCount = features[0]?.maxAssignmentsPerMonth ?? 5;
+
+          await db.insert(doctorAssignmentUsage).values({
+            doctorId: doctorResult[0].id,
+            subscriptionId: subscription.id,
+            month: periodStart.toISOString().slice(0, 7),
+            count: 0,
+            limitCount,
+            resetDate: periodEnd.toISOString(),
+            periodStart: periodStart.toISOString(),
+            periodEnd: periodEnd.toISOString(),
+          }).onConflictDoNothing({ target: [doctorAssignmentUsage.subscriptionId, doctorAssignmentUsage.periodStart] });
+        }
+      } else if (userRole === 'hospital') {
+        const hospitalResult = await db
+          .select({ id: hospitals.id })
+          .from(hospitals)
+          .where(eq(hospitals.userId, subscription.userId))
+          .limit(1);
+
+        if (hospitalResult.length > 0) {
+          const features = await db
+            .select({
+              maxPatientsPerMonth: hospitalPlanFeatures.maxPatientsPerMonth,
+              maxAssignmentsPerMonth: hospitalPlanFeatures.maxAssignmentsPerMonth,
+            })
+            .from(hospitalPlanFeatures)
+            .where(eq(hospitalPlanFeatures.planId, subscription.planId))
+            .limit(1);
+
+          const patientsLimit = features[0]?.maxPatientsPerMonth ?? 10;
+          const assignmentsLimit = features[0]?.maxAssignmentsPerMonth ?? 20;
+
+          await db.insert(hospitalUsageTracking).values({
+            hospitalId: hospitalResult[0].id,
+            subscriptionId: subscription.id,
+            month: periodStart.toISOString().slice(0, 7),
+            patientsCount: 0,
+            assignmentsCount: 0,
+            patientsLimit,
+            assignmentsLimit,
+            resetDate: periodEnd.toISOString(),
+            periodStart: periodStart.toISOString(),
+            periodEnd: periodEnd.toISOString(),
+          }).onConflictDoNothing({ target: [hospitalUsageTracking.subscriptionId, hospitalUsageTracking.periodStart] });
+        }
+      }
+
+      periodStart = periodEnd;
+    }
+  }
 }
+
 
 
 
