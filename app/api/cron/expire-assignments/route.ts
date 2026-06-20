@@ -17,18 +17,12 @@ const CRON_SECRET = process.env.CRON_SECRET;
  */
 async function handler(req: NextRequest) {
   try {
-    // // Vercel Cron Jobs send this header automatically
-    // const authHeader = req.headers.get('authorization');
-    // const isVercelCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+    const authHeader = req.headers.get('authorization');
+    const providedSecret = req.headers.get('x-cron-secret');
     
-    // // Also support manual calls with x-cron-secret header (for GitHub Actions, Render, etc.)
-    // const providedSecret = req.headers.get('x-cron-secret');
-    // const isManualCall = CRON_SECRET && providedSecret === CRON_SECRET;
-    
-    // // Allow if it's a Vercel cron job OR if secret matches (for manual testing/external cron)
-    // if (CRON_SECRET && !isVercelCron && !isManualCall) {
-    //   return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-    // }
+    if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}` && providedSecret !== CRON_SECRET) {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
     console.log('Expire-assignments cron job started');
 
     const db = getDb();
