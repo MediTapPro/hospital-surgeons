@@ -1,0 +1,23 @@
+name: Generate Availability
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call API
+        env:
+          CRON_SECRET: ${{ github.ref_name == 'master' && secrets.PROD_CRON_SECRET || secrets.DEV_CRON_SECRET }}
+          APP_URL: ${{ github.ref_name == 'master' && secrets.PROD_APP_URL || secrets.DEV_APP_URL }}
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X GET \
+            -H "x-cron-secret: $CRON_SECRET" \
+            "$APP_URL/api/cron/generate-availability")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n-1)
+          echo "Response: $http_code"
+          if [ "$http_code" -ne 200 ]; then exit 1; fi
