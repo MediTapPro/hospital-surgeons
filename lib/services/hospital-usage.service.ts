@@ -13,7 +13,7 @@ import {
   hospitalPlanFeatures,
   hospitalUsageTracking 
 } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, lte, gt } from 'drizzle-orm';
 import { 
   getMaxPatientsForHospital,
   getMaxAssignmentsForHospitalFromUser,
@@ -23,6 +23,34 @@ import {
 
 export class HospitalUsageService {
   private db = getDb();
+
+  private async getCurrentPeriodUsage(hospitalId: string) {
+    const sub = await this.db
+      .select({
+        id: subscriptions.id,
+      })
+      .from(subscriptions)
+      .innerJoin(hospitals, eq(hospitals.userId, subscriptions.userId))
+      .where(and(eq(hospitals.id, hospitalId), eq(subscriptions.status, 'active')))
+      .limit(1);
+
+    if (sub.length === 0) return null;
+
+    const [usage] = await this.db
+      .select()
+      .from(hospitalUsageTracking)
+      .where(
+        and(
+          eq(hospitalUsageTracking.hospitalId, hospitalId),
+          eq(hospitalUsageTracking.subscriptionId, sub[0].id),
+          lte(hospitalUsageTracking.periodStart, sql`NOW()`),
+          gt(hospitalUsageTracking.periodEnd, sql`NOW()`)
+        )
+      )
+      .limit(1);
+
+    return usage || null;
+  }
 
   /**
    * Check if hospital can create more patients
@@ -48,68 +76,10 @@ export class HospitalUsageService {
       return;
     }
 
-    // Get or create usage record for current month
-    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
-    
-    let usage = await this.db
-      .select()
-      .from(hospitalUsageTracking)
-      .where(
-        and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
-        )
-      )
-      .limit(1);
+    // Get current period usage via subscription period
+    const usageData = await this.getCurrentPeriodUsage(hospitalId);
 
-    if (usage.length === 0) {
-      // Create new usage record
-      const resetDate = new Date();
-      resetDate.setMonth(resetDate.getMonth() + 1);
-      resetDate.setDate(1);
-      resetDate.setHours(0, 0, 0, 0);
-
-      // Get assignment limit from database too
-      const maxAssignments = await getMaxAssignmentsForHospitalFromUser(hospital[0].userId);
-
-      const usageResult = await this.db
-        .insert(hospitalUsageTracking)
-        .values({
-          hospitalId,
-          month: currentMonth,
-          patientsCount: 0,
-          assignmentsCount: 0,
-          patientsLimit: maxPatients,
-          assignmentsLimit: maxAssignments,
-          resetDate: resetDate.toISOString(),
-        })
-        .returning();
-      usage = usageResult;
-    } else {
-      // Update limits if plan changed
-      const usageData = usage[0];
-      // Get current limits from database to check if they changed
-      const currentMaxPatients = await getMaxPatientsForHospital(hospital[0].userId);
-      const currentMaxAssignments = await getMaxAssignmentsForHospitalFromUser(hospital[0].userId);
-      
-      if (usageData.patientsLimit !== currentMaxPatients || usageData.assignmentsLimit !== currentMaxAssignments) {
-        await this.db
-          .update(hospitalUsageTracking)
-          .set({
-            patientsLimit: currentMaxPatients,
-            assignmentsLimit: currentMaxAssignments,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(hospitalUsageTracking.hospitalId, hospitalId),
-              eq(hospitalUsageTracking.month, currentMonth)
-            )
-          );
-      }
-    }
-
-    const usageData = usage[0] || usage;
+    if (!usageData) return;
 
     // Check if limit reached
     if (usageData.patientsCount >= maxPatients) {
@@ -141,68 +111,10 @@ export class HospitalUsageService {
       return;
     }
 
-    // Get or create usage record for current month
-    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
-    
-    let usage = await this.db
-      .select()
-      .from(hospitalUsageTracking)
-      .where(
-        and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
-        )
-      )
-      .limit(1);
+    // Get current period usage via subscription period
+    const usageData = await this.getCurrentPeriodUsage(hospitalId);
 
-    if (usage.length === 0) {
-      // Create new usage record
-      const resetDate = new Date();
-      resetDate.setMonth(resetDate.getMonth() + 1);
-      resetDate.setDate(1);
-      resetDate.setHours(0, 0, 0, 0);
-
-      // Get patient limit from database too
-      const maxPatients = await getMaxPatientsForHospital(hospital[0].userId);
-
-      const usageResult = await this.db
-        .insert(hospitalUsageTracking)
-        .values({
-          hospitalId,
-          month: currentMonth,
-          patientsCount: 0,
-          assignmentsCount: 0,
-          patientsLimit: maxPatients,
-          assignmentsLimit: maxAssignments,
-          resetDate: resetDate.toISOString(),
-        })
-        .returning();
-      usage = usageResult;
-    } else {
-      // Update limits if plan changed
-      const usageData = usage[0];
-      // Get current limits from database to check if they changed
-      const currentMaxPatients = await getMaxPatientsForHospital(hospital[0].userId);
-      const currentMaxAssignments = await getMaxAssignmentsForHospitalFromUser(hospital[0].userId);
-      
-      if (usageData.assignmentsLimit !== currentMaxAssignments || usageData.patientsLimit !== currentMaxPatients) {
-        await this.db
-          .update(hospitalUsageTracking)
-          .set({
-            patientsLimit: currentMaxPatients,
-            assignmentsLimit: currentMaxAssignments,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(hospitalUsageTracking.hospitalId, hospitalId),
-              eq(hospitalUsageTracking.month, currentMonth)
-            )
-          );
-      }
-    }
-
-    const usageData = usage[0] || usage;
+    if (!usageData) return;
 
     // Check if limit reached
     if (usageData.assignmentsCount >= maxAssignments) {
@@ -214,134 +126,40 @@ export class HospitalUsageService {
    * Increment patient usage count
    */
   async incrementPatientUsage(hospitalId: string): Promise<void> {
-    const currentMonth = new Date().toISOString().slice(0, 7);
+    const usageData = await this.getCurrentPeriodUsage(hospitalId);
+    if (!usageData) return;
 
-    // Get or create usage record
-    let usage = await this.db
-      .select()
-      .from(hospitalUsageTracking)
-      .where(
-        and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
-        )
-      )
-      .limit(1);
-
-    if (usage.length === 0) {
-      // Get hospital's userId to determine limits
-      const hospital = await this.db
-        .select({ userId: hospitals.userId })
-        .from(hospitals)
-        .where(eq(hospitals.id, hospitalId))
-        .limit(1);
-
-      if (hospital.length === 0) return;
-
-      // Get limits from database (queries hospitalPlanFeatures)
-      const maxPatients = await getMaxPatientsForHospital(hospital[0].userId);
-      const maxAssignments = await getMaxAssignmentsForHospitalFromUser(hospital[0].userId);
-
-      const resetDate = new Date();
-      resetDate.setMonth(resetDate.getMonth() + 1);
-      resetDate.setDate(1);
-      resetDate.setHours(0, 0, 0, 0);
-
-      await this.db.insert(hospitalUsageTracking).values({
-        hospitalId,
-        month: currentMonth,
-        patientsCount: 1,
-        assignmentsCount: 0,
-        patientsLimit: maxPatients,
-        assignmentsLimit: maxAssignments,
-        resetDate: resetDate.toISOString(),
-      });
-    } else {
-      // Increment existing count
-      await this.db
-        .update(hospitalUsageTracking)
-        .set({
-          patientsCount: sql`${hospitalUsageTracking.patientsCount} + 1`,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(
-          and(
-            eq(hospitalUsageTracking.hospitalId, hospitalId),
-            eq(hospitalUsageTracking.month, currentMonth)
-          )
-        );
-    }
+    // Increment existing count
+    await this.db
+      .update(hospitalUsageTracking)
+      .set({
+        patientsCount: sql`${hospitalUsageTracking.patientsCount} + 1`,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(hospitalUsageTracking.id, usageData.id));
   }
 
   /**
    * Increment assignment usage count
    */
   async incrementAssignmentUsage(hospitalId: string): Promise<void> {
-    const currentMonth = new Date().toISOString().slice(0, 7);
+    const usageData = await this.getCurrentPeriodUsage(hospitalId);
+    if (!usageData) return;
 
-    // Get or create usage record
-    let usage = await this.db
-      .select()
-      .from(hospitalUsageTracking)
-      .where(
-        and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
-        )
-      )
-      .limit(1);
-
-    if (usage.length === 0) {
-      // Get hospital's userId to determine limits
-      const hospital = await this.db
-        .select({ userId: hospitals.userId })
-        .from(hospitals)
-        .where(eq(hospitals.id, hospitalId))
-        .limit(1);
-
-      if (hospital.length === 0) return;
-
-      // Get limits from database (queries hospitalPlanFeatures)
-      const maxPatients = await getMaxPatientsForHospital(hospital[0].userId);
-      const maxAssignments = await getMaxAssignmentsForHospitalFromUser(hospital[0].userId);
-
-      const resetDate = new Date();
-      resetDate.setMonth(resetDate.getMonth() + 1);
-      resetDate.setDate(1);
-      resetDate.setHours(0, 0, 0, 0);
-
-      await this.db.insert(hospitalUsageTracking).values({
-        hospitalId,
-        month: currentMonth,
-        patientsCount: 0,
-        assignmentsCount: 1,
-        patientsLimit: maxPatients,
-        assignmentsLimit: maxAssignments,
-        resetDate: resetDate.toISOString(),
-      });
-    } else {
-      // Increment existing count
-      await this.db
-        .update(hospitalUsageTracking)
-        .set({
-          assignmentsCount: sql`${hospitalUsageTracking.assignmentsCount} + 1`,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(
-          and(
-            eq(hospitalUsageTracking.hospitalId, hospitalId),
-            eq(hospitalUsageTracking.month, currentMonth)
-          )
-        );
-    }
+    // Increment existing count
+    await this.db
+      .update(hospitalUsageTracking)
+      .set({
+        assignmentsCount: sql`${hospitalUsageTracking.assignmentsCount} + 1`,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(hospitalUsageTracking.id, usageData.id));
   }
 
   /**
-   * Get current month usage for a hospital
+   * Get current period usage for a hospital
    */
   async getUsage(hospitalId: string) {
-    const currentMonth = new Date().toISOString().slice(0, 7);
-
     // Get hospital's userId
     const hospital = await this.db
       .select({ userId: hospitals.userId })
@@ -377,24 +195,13 @@ export class HospitalUsageService {
       ? subscription[0].plan.name 
       : 'Free Plan';
 
-    // Get usage record
-    const usage = await this.db
-      .select()
-      .from(hospitalUsageTracking)
-      .where(
-        and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
-        )
-      )
-      .limit(1);
-
-    const usageData = usage.length > 0 ? usage[0] : {
+    // Get current period usage via subscription period
+    const usageData = await this.getCurrentPeriodUsage(hospitalId) || {
       patientsCount: 0,
       assignmentsCount: 0,
       patientsLimit: maxPatients,
       assignmentsLimit: maxAssignments,
-      month: currentMonth,
+      periodEnd: null,
     };
 
     // Calculate percentages
@@ -418,11 +225,9 @@ export class HospitalUsageService {
     const patientsStatus = calculateStatus(usageData.patientsCount, maxPatients, patientsPercentage);
     const assignmentsStatus = calculateStatus(usageData.assignmentsCount, maxAssignments, assignmentsPercentage);
 
-    // Calculate reset date (1st of next month)
-    const resetDate = new Date();
-    resetDate.setMonth(resetDate.getMonth() + 1);
-    resetDate.setDate(1);
-    resetDate.setHours(0, 0, 0, 0);
+    const resetDate = usageData.periodEnd
+      ? new Date(usageData.periodEnd).toISOString()
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
     return {
       patients: {
@@ -440,7 +245,7 @@ export class HospitalUsageService {
         remaining: maxAssignments === -1 ? -1 : Math.max(0, maxAssignments - usageData.assignmentsCount),
       },
       plan: planName,
-      resetDate: resetDate.toISOString(),
+      resetDate,
     };
   }
 }

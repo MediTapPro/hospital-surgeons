@@ -258,7 +258,7 @@ export class SubscriptionsRepository {
     await this.db.delete(subscriptionPlans).where(eq(subscriptionPlans.id, id));
   }
 
-  async create(dto: CreateSubscriptionData) {
+  async create(dto: CreateSubscriptionData, tx?: any) {
     // Get plan details first (needed for defaultBillingCycle)
     const [plan] = await this.db
       .select()
@@ -273,23 +273,17 @@ export class SubscriptionsRepository {
     // Fetch pricing information if pricingId is provided
     let priceAtPurchase = 0;
     let currencyAtPurchase = 'USD';
-    let billingCycle = plan.defaultBillingCycle || 'monthly'; // Use plan's default if available
+    let billingCycle = plan.defaultBillingCycle || 'monthly';
     let billingPeriodMonths = 1;
     let pricingId = dto.pricingId;
 
-    // Helper function to calculate billingPeriodMonths from billingCycle
     const calculateBillingPeriodMonths = (cycle: string): number => {
       switch (cycle) {
-        case 'monthly':
-          return 1;
-        case 'quarterly':
-          return 3;
-        case 'yearly':
-          return 12;
-        case 'custom':
-          return 1; // Default for custom, should be set explicitly
-        default:
-          return 1;
+        case 'monthly': return 1;
+        case 'quarterly': return 3;
+        case 'yearly': return 12;
+        case 'custom': return 1;
+        default: return 1;
       }
     };
 
@@ -306,11 +300,9 @@ export class SubscriptionsRepository {
         billingCycle = pricing.billingCycle;
         billingPeriodMonths = pricing.billingPeriodMonths;
       } else {
-        // Pricing ID provided but not found, use plan defaults
         billingPeriodMonths = calculateBillingPeriodMonths(billingCycle);
       }
     } else {
-      // If no pricingId provided, try to get default pricing for the plan
       const [defaultPricing] = await this.db
         .select()
         .from(planPricing)
@@ -330,8 +322,6 @@ export class SubscriptionsRepository {
         billingPeriodMonths = defaultPricing.billingPeriodMonths;
         pricingId = defaultPricing.id;
       } else {
-        // No pricing found (e.g., free plans) - use plan's defaultBillingCycle
-        // billingCycle already set from plan.defaultBillingCycle || 'monthly'
         billingPeriodMonths = calculateBillingPeriodMonths(billingCycle);
       }
     }
@@ -385,22 +375,19 @@ export class SubscriptionsRepository {
       }
     }
 
-    const result = await this.db
+    const dbInstance = tx || this.db;
+    const result = await dbInstance
       .insert(subscriptions)
       .values({
         userId: dto.userId,
         planId: dto.planId,
         pricingId: pricingId,
-        status: (dto.status || 'active') as any, // Default to 'active' (schema allows: active, expired, cancelled, suspended)
+        status: (dto.status || 'active') as any,
         startDate: dto.startDate,
         endDate: dto.endDate,
         autoRenew: dto.autoRenew ?? true,
         billingCycle: billingCycle,
         billingPeriodMonths: billingPeriodMonths,
-        // Note: The following fields may exist in the database but are not in the Drizzle schema:
-        // - priceAtPurchase, currencyAtPurchase, planSnapshot, featuresAtPurchase
-        // - previousSubscriptionId, upgradeFromPlanId, upgradeFromPricingId
-        // They should be added to the schema via migration if needed
       })
       .returning();
     

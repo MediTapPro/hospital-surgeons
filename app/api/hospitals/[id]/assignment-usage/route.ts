@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { hospitals, subscriptions, subscriptionPlans, hospitalPlanFeatures, hospitalUsageTracking } from '@/src/db/drizzle/migrations/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lte, gt, sql } from 'drizzle-orm';
 import { getMaxAssignmentsForHospitalFromUser, DEFAULT_HOSPITAL_ASSIGNMENT_LIMIT } from '@/lib/config/hospital-subscription-limits';
 
 /**
@@ -61,8 +61,6 @@ export async function GET(
     const hospitalId = params.id;
     const db = getDb();
 
-    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
-
     // Get hospital's userId
     const hospital = await db
       .select({ userId: hospitals.userId })
@@ -101,23 +99,38 @@ export async function GET(
       ? subscription[0].plan.name 
       : 'Free Plan';
 
-    // Get usage record
-    const usage = await db
-      .select()
-      .from(hospitalUsageTracking)
+    // Get current period usage record via subscription period
+    const activeSub = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
       .where(
         and(
-          eq(hospitalUsageTracking.hospitalId, hospitalId),
-          eq(hospitalUsageTracking.month, currentMonth)
+          eq(subscriptions.userId, hospital[0].userId),
+          eq(subscriptions.status, 'active')
         )
       )
       .limit(1);
 
-    const usageData = usage.length > 0 ? usage[0] : {
-      assignmentsCount: 0,
-      assignmentsLimit: maxAssignments,
-      month: currentMonth,
-    };
+    let usageData: any = { assignmentsCount: 0, assignmentsLimit: maxAssignments, periodEnd: null };
+
+    if (activeSub.length > 0) {
+      const usage = await db
+        .select()
+        .from(hospitalUsageTracking)
+        .where(
+          and(
+            eq(hospitalUsageTracking.hospitalId, hospitalId),
+            eq(hospitalUsageTracking.subscriptionId, activeSub[0].id),
+            lte(hospitalUsageTracking.periodStart, sql`NOW()`),
+            gt(hospitalUsageTracking.periodEnd, sql`NOW()`)
+          )
+        )
+        .limit(1);
+
+      if (usage.length > 0) {
+        usageData = usage[0];
+      }
+    }
 
     // Calculate percentage (skip if unlimited)
     const percentage = maxAssignments === -1 
@@ -136,11 +149,9 @@ export async function GET(
       }
     }
 
-    // Calculate reset date (1st of next month)
-    const resetDate = new Date();
-    resetDate.setMonth(resetDate.getMonth() + 1);
-    resetDate.setDate(1);
-    resetDate.setHours(0, 0, 0, 0);
+    const resetDate = usageData.periodEnd
+      ? new Date(usageData.periodEnd).toISOString()
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
     return NextResponse.json({
       success: true,
@@ -149,7 +160,7 @@ export async function GET(
         limit: maxAssignments,
         percentage,
         status,
-        resetDate: resetDate.toISOString(),
+        resetDate,
         remaining: maxAssignments === -1 ? -1 : Math.max(0, maxAssignments - usageData.assignmentsCount),
         plan: planName,
       },
