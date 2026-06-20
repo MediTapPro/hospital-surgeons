@@ -9,13 +9,14 @@ import { SubscriptionsService } from '@/lib/services/subscriptions.service';
  * - API key in headers
  * - Or use Vercel Cron secret
  */
+const CRON_SECRET = process.env.CRON_SECRET;
+
 export async function GET(req: NextRequest) {
   try {
-    // Optional: Verify cron secret
     const authHeader = req.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
+    const providedSecret = req.headers.get('x-cron-secret');
     
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}` && providedSecret !== CRON_SECRET) {
       return NextResponse.json(
         { success: false, message: 'Unauthorized' },
         { status: 401 }
