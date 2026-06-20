@@ -25,7 +25,7 @@ jobs:
           fi
           
           echo "Calling expire-assignments endpoint..."
-          response=$(curl -s -w "\n%{http_code}" -X GET \
+          response=$(curl -sL -w "\n%{http_code}" -X GET \
             -H "x-cron-secret: $CRON_SECRET" \
             "$APP_URL/api/cron/expire-assignments")
           
@@ -35,10 +35,9 @@ jobs:
           echo "Response HTTP Code: $http_code"
           echo "Response Body: $body"
           
-          if [ "$http_code" -eq 200 ]; then
-            echo "✅ Successfully processed expired assignments"
-          else
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
             echo "❌ Failed to process expired assignments (HTTP $http_code)"
             exit 1
           fi
+          echo "✅ Successfully processed expired assignments"
 
