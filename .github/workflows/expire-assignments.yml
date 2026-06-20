@@ -11,8 +11,8 @@ jobs:
     steps:
       - name: Cancel Expired Assignments
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ github.ref_name == 'master' && secrets.PROD_CRON_SECRET || secrets.DEV_CRON_SECRET }}
+          APP_URL: ${{ github.ref_name == 'master' && secrets.PROD_APP_URL || secrets.DEV_APP_URL }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
             echo "Error: CRON_SECRET secret is not set in GitHub Secrets"
