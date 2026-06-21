@@ -1,4 +1,4 @@
-name: Deploy Supabase Migrations (Manual)
+name: Deploy Supabase Migrations & Edge Functions (Manual)
 
 on:
   workflow_dispatch:
@@ -21,5 +21,20 @@ jobs:
 
       - name: Deploy migrations
         run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy expire-assignments
+        run: supabase functions deploy expire-assignments --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy process-expired-subscriptions
+        run: supabase functions deploy process-expired-subscriptions --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy generate-availability
+        run: supabase functions deploy generate-availability --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
