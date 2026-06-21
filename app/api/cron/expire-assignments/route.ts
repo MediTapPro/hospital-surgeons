@@ -7,7 +7,9 @@ const CRON_SECRET = process.env.CRON_SECRET;
 
 /**
  * Auto-cancel expired assignments
- * This endpoint should be called by a cron job (GitHub Actions, Vercel Cron, etc.)
+ * 
+ * Primary: pg_cron runs inside the DB every 5 minutes (migration 20260621000000).
+ * This HTTP endpoint is kept as a manual fallback for testing/on-demand runs.
  * 
  * Finds all pending assignments where expiresAt < NOW() and:
  * 1. Updates status to 'cancelled'

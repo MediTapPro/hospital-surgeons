@@ -39,6 +39,7 @@
   "exclude": [
     "node_modules",
     "Hospital Dashboard MVP Design",
-    "Doctor Dashboard Design/**/*"
+    "Doctor Dashboard Design/**/*",
+    "supabase/functions"
   ]
 }
