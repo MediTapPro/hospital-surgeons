@@ -1,7 +1,12 @@
-name: Deploy Supabase Migrations & Edge Functions (Manual)
+name: Deploy Supabase Migrations & Cron Config
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/functions/**'
 
 jobs:
   deploy:
@@ -11,11 +16,24 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "master" ]; then
+            echo "project_ref=${{ secrets.PROD_PROJECT_REF }}" >> $GITHUB_OUTPUT
+            echo "app_url=${{ secrets.PROD_APP_URL }}" >> $GITHUB_OUTPUT
+            echo "cron_secret=${{ secrets.PROD_CRON_SECRET }}" >> $GITHUB_OUTPUT
+          else
+            echo "project_ref=${{ secrets.DEV_PROJECT_REF }}" >> $GITHUB_OUTPUT
+            echo "app_url=${{ secrets.DEV_APP_URL }}" >> $GITHUB_OUTPUT
+            echo "cron_secret=${{ secrets.DEV_CRON_SECRET }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Install Supabase CLI
         run: npm install -g supabase
 
       - name: Link Supabase Project
-        run: supabase link --project-ref ${{ secrets.PROD_PROJECT_REF }}
+        run: supabase link --project-ref ${{ steps.env.outputs.project_ref }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
@@ -24,17 +42,11 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      - name: Deploy expire-assignments
-        run: supabase functions deploy expire-assignments --no-verify-jwt
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-
-      - name: Deploy process-expired-subscriptions
-        run: supabase functions deploy process-expired-subscriptions --no-verify-jwt
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-
-      - name: Deploy generate-availability
-        run: supabase functions deploy generate-availability --no-verify-jwt
+      - name: Set app_url and cron_secret in cron_config
+        run: |
+          supabase db query --linked "
+            INSERT INTO cron_config (key, value) VALUES ('app_url', '${{ steps.env.outputs.app_url }}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+            INSERT INTO cron_config (key, value) VALUES ('cron_secret', '${{ steps.env.outputs.cron_secret }}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+          "
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
