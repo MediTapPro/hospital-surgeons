@@ -21,26 +21,29 @@ jobs:
         run: |
           if [ "${{ github.ref_name }}" = "master" ]; then
             echo "project_ref=${{ secrets.PROD_PROJECT_REF }}" >> $GITHUB_OUTPUT
+            echo "SUPABASE_ACCESS_TOKEN=${{ secrets.PROD_SUPABASE_ACCESS_TOKEN }}" >> $GITHUB_OUTPUT
             echo "app_url=${{ secrets.PROD_APP_URL }}" >> $GITHUB_OUTPUT
             echo "cron_secret=${{ secrets.PROD_CRON_SECRET }}" >> $GITHUB_OUTPUT
           else
             echo "project_ref=${{ secrets.DEV_PROJECT_REF }}" >> $GITHUB_OUTPUT
+            echo "SUPABASE_ACCESS_TOKEN=${{ secrets.DEV_SUPABASE_ACCESS_TOKEN }}" >> $GITHUB_OUTPUT
             echo "app_url=${{ secrets.DEV_APP_URL }}" >> $GITHUB_OUTPUT
             echo "cron_secret=${{ secrets.DEV_CRON_SECRET }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Install Supabase CLI
-        run: npm install -g supabase
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
 
       - name: Link Supabase Project
         run: supabase link --project-ref ${{ steps.env.outputs.project_ref }}
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ steps.env.outputs.SUPABASE_ACCESS_TOKEN }}
 
       - name: Deploy migrations
         run: supabase db push
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ steps.env.outputs.SUPABASE_ACCESS_TOKEN }}
 
       - name: Set app_url and cron_secret in cron_config
         run: |
@@ -49,4 +52,4 @@ jobs:
             INSERT INTO cron_config (key, value) VALUES ('cron_secret', '${{ steps.env.outputs.cron_secret }}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
           "
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ steps.env.outputs.SUPABASE_ACCESS_TOKEN }}
