@@ -79,64 +79,49 @@ function initializeFirebase(): admin.app.App | null {
     if (isJsonString) {
       let serviceAccountJson = trimmedKey;
 
-      // Pre-process: if JSON has literal newlines (common when pasted into Vercel env vars),
-      // repair by stripping whitespace outside strings AND escaping newlines inside strings
+      // Stage 1: Handle double-escaped format where \" appears (instead of plain ")
+      // This is the #1 Vercel issue — the entire JSON gets an extra layer of escaping.
+      // The private_key's \n turns into \\n, so we protect those first.
+      if (serviceAccountJson.includes('\\"')) {
+        console.log('🔍 Detected escaped quotes (\\"), unescaping...');
+        serviceAccountJson = serviceAccountJson
+          .replace(/\\\\n/g, '\x00NL\x00')
+          .replace(/\\\\r/g, '\x00CR\x00')
+          .replace(/\\\\t/g, '\x00TB\x00')
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, ' ')
+          .replace(/\\r/g, ' ')
+          .replace(/\\t/g, ' ')
+          .replace(/\\\\/g, '\\')
+          .replace(/\x00NL\x00/g, '\\n')
+          .replace(/\x00CR\x00/g, '\\r')
+          .replace(/\x00TB\x00/g, '\\t');
+      }
+
+      // Stage 2: Handle literal newline bytes in the raw value (pretty-printed JSON)
       if (serviceAccountJson.includes('\n')) {
-        console.log('🔍 JSON contains literal newlines, attempting repair...');
+        console.log('🔍 JSON contains literal newlines, repairing...');
         let repaired = '';
         let inString = false;
         let escape = false;
         for (const ch of serviceAccountJson) {
-          if (escape) {
-            repaired += ch;
-            escape = false;
-            continue;
-          }
-          if (ch === '\\') {
-            repaired += ch;
-            escape = true;
-            continue;
-          }
-          if (ch === '"') {
-            inString = !inString;
-            repaired += ch;
-            continue;
-          }
-          if (!inString && (ch === '\n' || ch === '\r' || ch === '\t')) {
-            continue;
-          }
-          if (inString && (ch === '\n' || ch === '\r')) {
-            repaired += '\\n';
-            continue;
-          }
+          if (escape) { repaired += ch; escape = false; continue; }
+          if (ch === '\\') { repaired += ch; escape = true; continue; }
+          if (ch === '"') { inString = !inString; repaired += ch; continue; }
+          if (!inString && (ch === '\n' || ch === '\r' || ch === '\t')) { continue; }
+          if (inString && (ch === '\n' || ch === '\r')) { repaired += '\\n'; continue; }
           repaired += ch;
         }
         serviceAccountJson = repaired;
-        console.log('🔍 JSON after repair, first 120 chars:', serviceAccountJson.substring(0, 120));
       }
 
-      // It's a JSON string - parse it directly
+      // Parse it
       try {
         serviceAccount = JSON.parse(serviceAccountJson);
       } catch (parseError: any) {
         console.error('❌ Error parsing Firebase service account JSON:', parseError.message);
         console.error('First 100 chars of key:', serviceAccountJson.substring(0, 100));
-
-        // Try to handle escaped JSON strings (common in environment variables)
-        try {
-          let unescaped = serviceAccountJson
-            .replace(/\\"/g, '"')
-            .replace(/\\n/g, '\n')
-            .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t')
-            .replace(/\\\\/g, '\\');
-
-          serviceAccount = JSON.parse(unescaped);
-          console.log('✅ Successfully parsed after unescaping');
-        } catch (secondParseError: any) {
-          console.error('❌ Error parsing Firebase service account JSON (second attempt):', secondParseError.message);
-          throw new Error(`Invalid Firebase service account JSON format: ${secondParseError.message}`);
-        }
+        throw new Error(`Invalid Firebase service account JSON format: ${parseError.message}`);
       }
     } else {
       // It's a file path - read from file
