@@ -45,6 +45,19 @@ function initializeFirebase(): admin.app.App | null {
     const firstChars = trimmedKey.substring(0, 20);
     console.log(`🔍 Firebase key starts with: ${firstChars}... (length: ${trimmedKey.length})`);
 
+    // Check if it's base64-encoded (doesn't start with { or -)
+    if (!trimmedKey.startsWith('{') && !trimmedKey.startsWith('-')) {
+      try {
+        const decoded = Buffer.from(trimmedKey, 'base64').toString('utf8');
+        if (decoded.startsWith('{')) {
+          console.log('🔍 Detected base64-encoded Firebase key, decoding...');
+          trimmedKey = decoded;
+        }
+      } catch {
+        // Not base64, continue as-is
+      }
+    }
+
     // Remove outer quotes if present (handles both single and double quotes)
     // This is common when environment variables are set with quotes
     const hadQuotes =
@@ -64,17 +77,54 @@ function initializeFirebase(): admin.app.App | null {
     }
 
     if (isJsonString) {
+      let serviceAccountJson = trimmedKey;
+
+      // Pre-process: if JSON has literal newlines (common when pasted into Vercel env vars),
+      // repair by stripping whitespace outside strings AND escaping newlines inside strings
+      if (serviceAccountJson.includes('\n')) {
+        console.log('🔍 JSON contains literal newlines, attempting repair...');
+        let repaired = '';
+        let inString = false;
+        let escape = false;
+        for (const ch of serviceAccountJson) {
+          if (escape) {
+            repaired += ch;
+            escape = false;
+            continue;
+          }
+          if (ch === '\\') {
+            repaired += ch;
+            escape = true;
+            continue;
+          }
+          if (ch === '"') {
+            inString = !inString;
+            repaired += ch;
+            continue;
+          }
+          if (!inString && (ch === '\n' || ch === '\r' || ch === '\t')) {
+            continue;
+          }
+          if (inString && (ch === '\n' || ch === '\r')) {
+            repaired += '\\n';
+            continue;
+          }
+          repaired += ch;
+        }
+        serviceAccountJson = repaired;
+        console.log('🔍 JSON after repair, first 120 chars:', serviceAccountJson.substring(0, 120));
+      }
+
       // It's a JSON string - parse it directly
       try {
-        serviceAccount = JSON.parse(trimmedKey);
+        serviceAccount = JSON.parse(serviceAccountJson);
       } catch (parseError: any) {
         console.error('❌ Error parsing Firebase service account JSON:', parseError.message);
-        console.error('First 100 chars of key:', trimmedKey.substring(0, 100));
+        console.error('First 100 chars of key:', serviceAccountJson.substring(0, 100));
 
         // Try to handle escaped JSON strings (common in environment variables)
         try {
-          // Unescape common patterns
-          let unescaped = trimmedKey
+          let unescaped = serviceAccountJson
             .replace(/\\"/g, '"')
             .replace(/\\n/g, '\n')
             .replace(/\\r/g, '\r')
