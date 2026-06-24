@@ -45,6 +45,19 @@ function initializeFirebase(): admin.app.App | null {
     const firstChars = trimmedKey.substring(0, 20);
     console.log(`🔍 Firebase key starts with: ${firstChars}... (length: ${trimmedKey.length})`);
 
+    // Check if it's base64-encoded (doesn't start with { or -)
+    if (!trimmedKey.startsWith('{') && !trimmedKey.startsWith('-')) {
+      try {
+        const decoded = Buffer.from(trimmedKey, 'base64').toString('utf8');
+        if (decoded.startsWith('{')) {
+          console.log('🔍 Detected base64-encoded Firebase key, decoding...');
+          trimmedKey = decoded;
+        }
+      } catch {
+        // Not base64, continue as-is
+      }
+    }
+
     // Remove outer quotes if present (handles both single and double quotes)
     // This is common when environment variables are set with quotes
     const hadQuotes =
@@ -64,29 +77,51 @@ function initializeFirebase(): admin.app.App | null {
     }
 
     if (isJsonString) {
-      // It's a JSON string - parse it directly
+      let serviceAccountJson = trimmedKey;
+
+      // Stage 1: Handle double-escaped format where \" appears (instead of plain ")
+      // This is the #1 Vercel issue — the entire JSON gets an extra layer of escaping.
+      // The private_key's \n turns into \\n, so we protect those first.
+      if (serviceAccountJson.includes('\\"')) {
+        console.log('🔍 Detected escaped quotes (\\"), unescaping...');
+        serviceAccountJson = serviceAccountJson
+          .replace(/\\\\n/g, '\x00NL\x00')
+          .replace(/\\\\r/g, '\x00CR\x00')
+          .replace(/\\\\t/g, '\x00TB\x00')
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, ' ')
+          .replace(/\\r/g, ' ')
+          .replace(/\\t/g, ' ')
+          .replace(/\\\\/g, '\\')
+          .replace(/\x00NL\x00/g, '\\n')
+          .replace(/\x00CR\x00/g, '\\r')
+          .replace(/\x00TB\x00/g, '\\t');
+      }
+
+      // Stage 2: Handle literal newline bytes in the raw value (pretty-printed JSON)
+      if (serviceAccountJson.includes('\n')) {
+        console.log('🔍 JSON contains literal newlines, repairing...');
+        let repaired = '';
+        let inString = false;
+        let escape = false;
+        for (const ch of serviceAccountJson) {
+          if (escape) { repaired += ch; escape = false; continue; }
+          if (ch === '\\') { repaired += ch; escape = true; continue; }
+          if (ch === '"') { inString = !inString; repaired += ch; continue; }
+          if (!inString && (ch === '\n' || ch === '\r' || ch === '\t')) { continue; }
+          if (inString && (ch === '\n' || ch === '\r')) { repaired += '\\n'; continue; }
+          repaired += ch;
+        }
+        serviceAccountJson = repaired;
+      }
+
+      // Parse it
       try {
-        serviceAccount = JSON.parse(trimmedKey);
+        serviceAccount = JSON.parse(serviceAccountJson);
       } catch (parseError: any) {
         console.error('❌ Error parsing Firebase service account JSON:', parseError.message);
-        console.error('First 100 chars of key:', trimmedKey.substring(0, 100));
-
-        // Try to handle escaped JSON strings (common in environment variables)
-        try {
-          // Unescape common patterns
-          let unescaped = trimmedKey
-            .replace(/\\"/g, '"')
-            .replace(/\\n/g, '\n')
-            .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t')
-            .replace(/\\\\/g, '\\');
-
-          serviceAccount = JSON.parse(unescaped);
-          console.log('✅ Successfully parsed after unescaping');
-        } catch (secondParseError: any) {
-          console.error('❌ Error parsing Firebase service account JSON (second attempt):', secondParseError.message);
-          throw new Error(`Invalid Firebase service account JSON format: ${secondParseError.message}`);
-        }
+        console.error('First 100 chars of key:', serviceAccountJson.substring(0, 100));
+        throw new Error(`Invalid Firebase service account JSON format: ${parseError.message}`);
       }
     } else {
       // It's a file path - read from file
