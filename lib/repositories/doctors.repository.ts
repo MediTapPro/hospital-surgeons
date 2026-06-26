@@ -368,7 +368,7 @@ export class DoctorsRepository {
       .orderBy(asc(availabilityTemplates.validFrom), asc(availabilityTemplates.startTime));
 
     return templates
-      .map((row) => this.mapTemplateRow(row))
+      .map((row: any) => this.mapTemplateRow(row))
       .filter(Boolean) as Array<AvailabilityTemplateRow & { recurrenceDays: string[] }>;
   }
 
@@ -432,7 +432,7 @@ export class DoctorsRepository {
       ));
 
     return templates
-      .map((row) => this.mapTemplateRow(row))
+      .map((row: any) => this.mapTemplateRow(row))
       .filter(Boolean) as Array<AvailabilityTemplateRow & { recurrenceDays: string[] }>;
   }
 
@@ -651,11 +651,11 @@ export class DoctorsRepository {
 
     // Sort sub-slots by start time
     const bookedRanges = subSlots
-      .map(slot => ({
+      .map((slot: any) => ({
         start: parseTime(slot.startTime),
         end: parseTime(slot.endTime)
       }))
-      .sort((a, b) => a.start - b.start);
+      .sort((a: any, b: any) => a.start - b.start);
 
     // Calculate available ranges
     const availableRanges: Array<{startTime: string, endTime: string}> = [];
@@ -790,7 +790,7 @@ export class DoctorsRepository {
   }
 
   async addProfilePhoto(doctorId: string, fileId: string, isPrimary: boolean = false) {
-    return await this.db.transaction(async (tx) => {
+    return await this.db.transaction(async (tx:any) => {
       // If setting as primary, unset all other primary photos first
       if (isPrimary) {
         await tx
@@ -807,7 +807,7 @@ export class DoctorsRepository {
   }
 
   async setPrimaryPhoto(doctorId: string, photoId: string) {
-    return await this.db.transaction(async (tx) => {
+    return await this.db.transaction(async (tx:any) => {
       // Unset all primary photos, then set the selected one
       await tx
         .update(doctorProfilePhotos)

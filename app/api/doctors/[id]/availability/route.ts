@@ -171,8 +171,8 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ id: str
         
         // Filter only booked sub-slots
         const bookedSubslots = subSlots
-          .filter(subSlot => subSlot.status === 'booked')
-          .map(subSlot => ({
+          .filter((subSlot: any) => subSlot.status === 'booked')
+          .map((subSlot: any) => ({
             id: subSlot.id,
             start: subSlot.startTime,
             end: subSlot.endTime,
