@@ -93,7 +93,7 @@ export interface DoctorQuery {
 type AvailabilityTemplateRow = typeof availabilityTemplates.$inferSelect;
 
 export class DoctorsRepository {
-  private db = getDb();
+  constructor(private db: any = getDb()) {}
 
   private mapTemplateRow(row: AvailabilityTemplateRow | null | undefined) {
     if (!row) return null;
@@ -148,6 +148,27 @@ export class DoctorsRepository {
     
     return await this.db
       .insert(doctors)
+      .values(values)
+      .returning();
+  }
+
+  async findDoctorByLicenseNumber(licenseNumber: string) {
+    return this.db
+      .select()
+      .from(doctors)
+      .where(eq(doctors.medicalLicenseNumber, licenseNumber))
+      .limit(1);
+  }
+
+  async addSpecialties(specialtiesData: CreateDoctorSpecialtyData[], doctorId: string) {
+    const values = specialtiesData.map(s => ({
+      doctorId,
+      specialtyId: s.specialtyId,
+      isPrimary: s.isPrimary || false,
+      yearsOfExperience: s.yearsOfExperience || null,
+    }));
+    return await this.db
+      .insert(doctorSpecialties)
       .values(values)
       .returning();
   }
