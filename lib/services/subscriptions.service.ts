@@ -513,24 +513,21 @@ export class SubscriptionsService {
   }
 
   /**
-   * Process expired subscriptions with pending plan changes
+   * Process expired subscriptions — handles both plan changes and free plan fallback
    * This should be called by a cron job or scheduled task
    */
   async processExpiredSubscriptionsWithPendingChanges() {
     try {
       const db = getDb();
 
-      // Find expired active subscriptions with pending plan changes
+      // Find all expired active subscriptions
       const expiredSubs = await db
         .select()
         .from(subscriptions)
         .where(
           and(
             eq(subscriptions.status, 'active'),
-            lte(subscriptions.endDate, sql`NOW()`),
-            eq(subscriptions.planChangeStatus, 'pending'),
-            sql`${subscriptions.nextPlanId} IS NOT NULL`,
-            sql`${subscriptions.nextPricingId} IS NOT NULL`
+            lte(subscriptions.endDate, sql`NOW()`)
           )
         );
 
@@ -538,101 +535,129 @@ export class SubscriptionsService {
 
       for (const oldSub of expiredSubs) {
         try {
-          // Validate plan and pricing still exist and are active
-          const newPlan = await this.repo.getPlan(oldSub.nextPlanId!);
-          if (!newPlan || !newPlan.isActive) {
-            // Mark as failed
-            await db
-              .update(subscriptions)
-              .set({
-                status: 'expired',
-                planChangeStatus: 'failed',
-              })
-              .where(eq(subscriptions.id, oldSub.id));
-            
-            results.push({
-              subscriptionId: oldSub.id,
-              status: 'failed',
-              reason: 'Plan no longer exists or inactive',
+          if (oldSub.nextPlanId && oldSub.nextPricingId) {
+            // --- Case 1: Has pending plan change ---
+            const newPlan = await this.repo.getPlan(oldSub.nextPlanId!);
+            if (!newPlan || !newPlan.isActive) {
+              await db
+                .update(subscriptions)
+                .set({ status: 'expired', planChangeStatus: 'failed' })
+                .where(eq(subscriptions.id, oldSub.id));
+              results.push({ subscriptionId: oldSub.id, status: 'failed', reason: 'Plan no longer exists or inactive' });
+              continue;
+            }
+
+            const pricingResult = await db
+              .select()
+              .from(planPricing)
+              .where(and(eq(planPricing.id, oldSub.nextPricingId!), eq(planPricing.planId, oldSub.nextPlanId!), eq(planPricing.isActive, true)))
+              .limit(1);
+
+            if (pricingResult.length === 0) {
+              await db
+                .update(subscriptions)
+                .set({ status: 'expired', planChangeStatus: 'failed' })
+                .where(eq(subscriptions.id, oldSub.id));
+              results.push({ subscriptionId: oldSub.id, status: 'failed', reason: 'Pricing no longer exists or inactive' });
+              continue;
+            }
+
+            const pricing = pricingResult[0];
+            const startDate = new Date(oldSub.endDate);
+            const endDate = new Date(startDate);
+            endDate.setMonth(endDate.getMonth() + (pricing.billingPeriodMonths || 1));
+
+            let newSubscription: any;
+            await db.transaction(async (tx) => {
+              const [created] = (await tx
+                .insert(subscriptions)
+                .values({
+                  userId: oldSub.userId,
+                  planId: oldSub.nextPlanId!,
+                  pricingId: oldSub.nextPricingId!,
+                  status: 'active',
+                  startDate: startDate.toISOString(),
+                  endDate: endDate.toISOString(),
+                  autoRenew: true,
+                })
+                .returning()) as any[];
+              newSubscription = created;
+
+              await tx
+                .update(subscriptions)
+                .set({
+                  status: 'expired',
+                  replacedBySubscriptionId: created.id,
+                  nextPlanId: null,
+                  nextPricingId: null,
+                  planChangeStatus: null,
+                })
+                .where(eq(subscriptions.id, oldSub.id));
+
+              await this.generateUsageRecords(newSubscription, tx);
             });
-            continue;
-          }
 
-          // Get pricing details
-          const pricingResult = await db
-            .select()
-            .from(planPricing)
-            .where(
-              and(
-                eq(planPricing.id, oldSub.nextPricingId!),
-                eq(planPricing.planId, oldSub.nextPlanId!),
-                eq(planPricing.isActive, true)
-              )
-            )
-            .limit(1);
+            results.push({ subscriptionId: oldSub.id, status: 'success', newSubscriptionId: newSubscription.id });
+          } else {
+            // --- Case 2: No pending plan change — fallback to free plan ---
+            const oldPlan = await this.repo.getPlan(oldSub.planId);
+            const userRole = oldPlan?.userRole || 'doctor';
 
-          if (pricingResult.length === 0) {
-            // Mark as failed
-            await db
-              .update(subscriptions)
-              .set({
-                status: 'expired',
-                planChangeStatus: 'failed',
-              })
-              .where(eq(subscriptions.id, oldSub.id));
-            
-            results.push({
-              subscriptionId: oldSub.id,
-              status: 'failed',
-              reason: 'Pricing no longer exists or inactive',
+            const [freePlan] = await db
+              .select()
+              .from(subscriptionPlans)
+              .where(and(eq(subscriptionPlans.tier, 'free'), eq(subscriptionPlans.userRole, userRole as any), eq(subscriptionPlans.isActive, true)))
+              .limit(1);
+
+            if (!freePlan) {
+              await db
+                .update(subscriptions)
+                .set({ status: 'expired' })
+                .where(eq(subscriptions.id, oldSub.id));
+              results.push({ subscriptionId: oldSub.id, status: 'expired', reason: 'No free plan found for fallback' });
+              continue;
+            }
+
+            const [freePricing] = await db
+              .select()
+              .from(planPricing)
+              .where(and(eq(planPricing.planId, freePlan.id), eq(planPricing.isActive, true)))
+              .orderBy(planPricing.billingPeriodMonths)
+              .limit(1);
+
+            const startDate = new Date(oldSub.endDate);
+            const endDate = new Date(startDate);
+            endDate.setMonth(endDate.getMonth() + 1);
+
+            let newSubscription: any;
+            await db.transaction(async (tx) => {
+              const [created] = (await tx
+                .insert(subscriptions)
+                .values({
+                  userId: oldSub.userId,
+                  planId: freePlan.id,
+                  pricingId: freePricing?.id || null,
+                  status: 'active',
+                  startDate: startDate.toISOString(),
+                  endDate: endDate.toISOString(),
+                  autoRenew: false,
+                })
+                .returning()) as any[];
+              newSubscription = created;
+
+              await tx
+                .update(subscriptions)
+                .set({
+                  status: 'expired',
+                  replacedBySubscriptionId: created.id,
+                })
+                .where(eq(subscriptions.id, oldSub.id));
+
+              await this.generateUsageRecords(newSubscription, tx);
             });
-            continue;
+
+            results.push({ subscriptionId: oldSub.id, status: 'renewed_free', newSubscriptionId: newSubscription.id });
           }
-
-          const pricing = pricingResult[0];
-
-          // Calculate new subscription dates
-          const startDate = new Date(oldSub.endDate);
-          const endDate = new Date(startDate);
-          endDate.setMonth(endDate.getMonth() + (pricing.billingPeriodMonths || 1));
-
-          // Create new subscription, expire old one, and generate usage records atomically
-          let newSubscription: any;
-
-          await db.transaction(async (tx) => {
-            const [created] = (await tx
-              .insert(subscriptions)
-              .values({
-                userId: oldSub.userId,
-                planId: oldSub.nextPlanId!,
-                pricingId: oldSub.nextPricingId!,
-                status: 'active',
-                startDate: startDate.toISOString(),
-                endDate: endDate.toISOString(),
-                autoRenew: true,
-              })
-              .returning()) as any[];
-            newSubscription = created;
-
-            await tx
-              .update(subscriptions)
-              .set({
-                status: 'expired',
-                replacedBySubscriptionId: created.id,
-                nextPlanId: null,
-                nextPricingId: null,
-                planChangeStatus: null,
-              })
-              .where(eq(subscriptions.id, oldSub.id));
-
-            await this.generateUsageRecords(newSubscription, tx);
-          });
-
-          results.push({
-            subscriptionId: oldSub.id,
-            status: 'success',
-            newSubscriptionId: newSubscription.id,
-          });
         } catch (error) {
           console.error(`Error processing subscription ${oldSub.id}:`, error);
           results.push({

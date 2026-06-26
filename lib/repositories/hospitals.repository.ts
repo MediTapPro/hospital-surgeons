@@ -59,7 +59,7 @@ export interface HospitalQuery {
 }
 
 export class HospitalsRepository {
-  private db = getDb();
+  constructor(private db: any = getDb()) {}
 
   async createHospital(hospitalData: CreateHospitalData, userId: string) {
     try {
@@ -91,6 +91,25 @@ export class HospitalsRepository {
       console.error('Error creating hospital:', error);
       throw error;
     }
+  }
+
+  async findHospitalByRegistrationNumber(registrationNumber: string) {
+    return this.db
+      .select()
+      .from(hospitals)
+      .where(eq(hospitals.registrationNumber, registrationNumber))
+      .limit(1);
+  }
+
+  async addDepartments(departmentsData: CreateHospitalDepartmentData[], hospitalId: string) {
+    const values = departmentsData.map(d => ({
+      hospitalId,
+      specialtyId: d.specialtyId,
+    }));
+    return await this.db
+      .insert(hospitalDepartments)
+      .values(values)
+      .returning();
   }
 
   async findHospitalById(id: string) {

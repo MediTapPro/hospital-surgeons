@@ -23,7 +23,7 @@ export interface UpdateUserData {
 }
 
 export class UsersRepository {
-  private db = getDb();
+  constructor(private db: any = getDb()) {}
 
   async createUser(data: CreateUserData, role: 'doctor' | 'hospital' | 'admin' = 'doctor') {
     return await this.db
