@@ -1,13 +1,13 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy | Hospital Surgeons',
-  description: 'Privacy Policy for the Hospital Surgeons app.',
+  title: 'Privacy Policy | MediTap',
+  description: 'Privacy Policy for the MediTap app.',
 };
 
 const LAST_UPDATED = 'June 13, 2025';
 const CONTACT_EMAIL = 'medi.tap26@gmail.com';
-const COMPANY_NAME = 'Hospital Surgeons';
+const COMPANY_NAME = 'MediTap';
 
 export default function PrivacyPolicyPage() {
   return (

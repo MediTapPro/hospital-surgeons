@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Delete Account | Hospital Surgeons',
-  description: 'Request permanent deletion of your Hospital Surgeons account and associated data.',
+  title: 'Delete Account | MediTap',
+  description: 'Request permanent deletion of your MediTap account and associated data.',
 };
 
 const CONTACT_EMAIL = 'medi.tap26@gmail.com';
-const COMPANY_NAME = 'Hospital Surgeons';
+const COMPANY_NAME = 'MediTap';
 
 export default function DeleteAccountPage() {
   return (
@@ -22,7 +22,7 @@ export default function DeleteAccountPage() {
       <Section title="How to Request Deletion">
         <p>
           Send an email from your registered account email address to:{' '}
-          <a href={`mailto:${CONTACT_EMAIL}?subject=Account%20Deletion%20Request&body=Hello%2C%0A%0AI%20would%20like%20to%20permanently%20delete%20my%20Hospital%20Surgeons%20account.%0A%0ARegistered%20email%3A%20%5Byour%20email%5D%0AAccount%20type%3A%20%5BDoctor%20%2F%20Hospital%5D%0A%0APlease%20proceed%20with%20the%20deletion.`} style={{ color: '#2563eb' }}>
+          <a href={`mailto:${CONTACT_EMAIL}?subject=Account%20Deletion%20Request&body=Hello%2C%0A%0AI%20would%20like%20to%20permanently%20delete%20my%20MediTap%20account.%0A%0ARegistered%20email%3A%20%5Byour%20email%5D%0AAccount%20type%3A%20%5BDoctor%20%2F%20Hospital%5D%0A%0APlease%20proceed%20with%20the%20deletion.`} style={{ color: '#2563eb' }}>
             {CONTACT_EMAIL}
           </a>
         </p>
