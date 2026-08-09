@@ -16,7 +16,7 @@ export const DeviceSchema = z.object({
 export const LoginDtoSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: z.string().min(1, 'Password is required'),
-  accountType: z.enum(['doctor', 'hospital', 'admin']).optional(),
+  accountType: z.enum(['doctor', 'hospital', 'admin', 'patient']).optional(),
 });
 
 export type LoginDto = z.infer<typeof LoginDtoSchema>;

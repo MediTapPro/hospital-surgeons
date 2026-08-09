@@ -47,6 +47,7 @@ export function withAuth(
 
       return handler(req as AuthenticatedRequest);
     } catch (error) {
+      console.error('withAuth error:', error);
       return NextResponse.json(
         { success: false, message: 'Invalid token' },
         { status: 401 }

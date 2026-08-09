@@ -63,41 +63,6 @@ export const chatConversations = pgTable("chat_conversations", {
 	unique("chat_conversations_doctor_id_hospital_id_key").on(table.doctorId, table.hospitalId),
 ]);
 
-export const chatMessages = pgTable("chat_messages", {
-	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	conversationId: uuid("conversation_id").notNull(),
-	senderType: text("sender_type").notNull(),
-	senderId: uuid("sender_id").notNull(),
-	content: text().notNull(),
-	messageType: text("message_type").default('text').notNull(),
-	replyToId: uuid("reply_to_id"),
-	isRead: boolean("is_read").default(false).notNull(),
-	readAt: timestamp("read_at", { mode: 'string' }),
-	status: integer("status").default(1).notNull(),
-	isDeleted: boolean("is_deleted").default(false).notNull(),
-	deletedAt: timestamp("deleted_at", { mode: 'string' }),
-	isEdited: boolean("is_edited").default(false).notNull(),
-	editedAt: timestamp("edited_at", { mode: 'string' }),
-	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
-}, (table) => [
-	index("idx_chat_messages_conversation_id").using("btree", table.conversationId.asc().nullsLast().op("uuid_ops")),
-	index("idx_chat_messages_created_at").using("btree", table.createdAt.desc().nullsFirst().op("timestamp_ops")),
-	index("idx_chat_messages_sender_id").using("btree", table.senderId.asc().nullsLast().op("uuid_ops")),
-	foreignKey({
-			columns: [table.conversationId],
-			foreignColumns: [chatConversations.id],
-			name: "chat_messages_conversation_id_fkey"
-		}).onDelete("cascade"),
-	foreignKey({
-			columns: [table.replyToId],
-			foreignColumns: [table.id],
-			name: "chat_messages_reply_to_id_fkey"
-		}).onDelete("set null"),
-	check("chat_messages_message_type_check", sql`message_type = ANY (ARRAY['text'::text, 'attachment'::text, 'system'::text])`),
-	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
-]);
-
 export const otps = pgTable("otps", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	userId: uuid("user_id").notNull(),
@@ -139,7 +104,7 @@ export const users = pgTable("users", {
 	index("idx_users_role").using("btree", table.role.asc().nullsLast().op("text_ops")),
 	index("idx_users_status").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	unique("users_email_key").on(table.email),
-	check("users_role_check", sql`role = ANY (ARRAY['doctor'::text, 'hospital'::text, 'admin'::text])`),
+	check("users_role_check", sql`role = ANY (ARRAY['doctor'::text, 'hospital'::text, 'admin'::text, 'patient'::text])`),
 	check("users_status_check", sql`status = ANY (ARRAY['active'::text, 'inactive'::text, 'pending'::text, 'suspended'::text])`),
 	check("users_subscription_status_check", sql`subscription_status = ANY (ARRAY['active'::text, 'expired'::text, 'cancelled'::text, 'trial'::text])`),
 ]);
@@ -195,6 +160,11 @@ export const chatMessageReactions = pgTable("chat_message_reactions", {
 	unique("chat_message_reactions_message_id_reactor_id_key").on(table.messageId, table.reactorId),
 	check("chat_message_reactions_reactor_type_check", sql`reactor_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
 ]);
+
+export const cronConfig = pgTable("cron_config", {
+	key: text().primaryKey().notNull(),
+	value: text().notNull(),
+});
 
 export const procedureCategories = pgTable("procedure_categories", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
@@ -533,6 +503,37 @@ export const hospitalDocuments = pgTable("hospital_documents", {
 	check("hospital_documents_verification_status_check", sql`verification_status = ANY (ARRAY['pending'::text, 'verified'::text, 'rejected'::text])`),
 ]);
 
+export const hospitalUsageTracking = pgTable("hospital_usage_tracking", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	hospitalId: uuid("hospital_id").notNull(),
+	month: varchar({ length: 7 }).notNull(),
+	patientsCount: integer("patients_count").default(0).notNull(),
+	assignmentsCount: integer("assignments_count").default(0).notNull(),
+	patientsLimit: integer("patients_limit").notNull(),
+	assignmentsLimit: integer("assignments_limit").notNull(),
+	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	subscriptionId: uuid("subscription_id"),
+	periodStart: timestamp("period_start", { withTimezone: true, mode: 'string' }),
+	periodEnd: timestamp("period_end", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_hospital_usage_tracking_hospital_month").using("btree", table.hospitalId.asc().nullsLast().op("uuid_ops"), table.month.asc().nullsLast().op("uuid_ops")),
+	index("idx_hut_period").using("btree", table.periodStart.asc().nullsLast().op("timestamptz_ops"), table.periodEnd.asc().nullsLast().op("timestamptz_ops")),
+	index("idx_hut_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.hospitalId],
+			foreignColumns: [hospitals.id],
+			name: "hospital_usage_tracking_hospital_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "hospital_usage_tracking_subscription_id_fkey"
+		}),
+	unique("hospital_usage_tracking_sub_period_key").on(table.subscriptionId, table.periodStart),
+]);
+
 export const doctorHospitalAffiliations = pgTable("doctor_hospital_affiliations", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	doctorId: uuid("doctor_id").notNull(),
@@ -573,37 +574,6 @@ export const availabilityTemplates = pgTable("availability_templates", {
 		}).onDelete("cascade"),
 	check("availability_templates_check", sql`end_time > start_time`),
 	check("availability_templates_recurrence_pattern_check", sql`recurrence_pattern = ANY (ARRAY['daily'::text, 'weekly'::text, 'monthly'::text, 'custom'::text])`),
-]);
-
-export const hospitalUsageTracking = pgTable("hospital_usage_tracking", {
-	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
-	subscriptionId: uuid("subscription_id"),
-	month: varchar({ length: 7 }).notNull(),
-	patientsCount: integer("patients_count").default(0).notNull(),
-	assignmentsCount: integer("assignments_count").default(0).notNull(),
-	patientsLimit: integer("patients_limit").notNull(),
-	assignmentsLimit: integer("assignments_limit").notNull(),
-	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
-	periodStart: timestamp("period_start", { mode: 'string' }),
-	periodEnd: timestamp("period_end", { mode: 'string' }),
-	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
-}, (table) => [
-	index("idx_hospital_usage_tracking_hospital_month").using("btree", table.hospitalId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("text_ops")),
-	index("idx_hut_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
-	index("idx_hut_period").using("btree", table.periodStart.asc().nullsLast().op("timestamp_ops"), table.periodEnd.asc().nullsLast().op("timestamp_ops")),
-	foreignKey({
-			columns: [table.hospitalId],
-			foreignColumns: [hospitals.id],
-			name: "hospital_usage_tracking_hospital_id_fkey"
-		}).onDelete("cascade"),
-	foreignKey({
-			columns: [table.subscriptionId],
-			foreignColumns: [subscriptions.id],
-			name: "hospital_usage_tracking_subscription_id_fkey"
-		}).onDelete("cascade"),
-	unique("hospital_usage_tracking_sub_period_key").on(table.subscriptionId, table.periodStart),
 ]);
 
 export const hospitalDepartments = pgTable("hospital_departments", {
@@ -664,28 +634,33 @@ export const procedures = pgTable("procedures", {
 	unique("procedures_specialty_id_name_key").on(table.specialtyId, table.name),
 ]);
 
-export const patients = pgTable("patients", {
+export const doctorAssignmentUsage = pgTable("doctor_assignment_usage", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
-	fullName: text("full_name").notNull(),
-	dateOfBirth: date("date_of_birth").notNull(),
-	gender: text(),
-	phone: text(),
-	emergencyContact: text("emergency_contact"),
-	address: text(),
-	medicalCondition: text("medical_condition"),
-	roomType: text("room_type"),
-	costPerDay: numeric("cost_per_day", { precision: 10, scale:  2 }),
-	medicalNotes: text("medical_notes"),
+	doctorId: uuid("doctor_id").notNull(),
+	month: varchar({ length: 7 }).notNull(),
+	count: integer().default(0).notNull(),
+	limitCount: integer("limit_count").notNull(),
+	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	subscriptionId: uuid("subscription_id"),
+	periodStart: timestamp("period_start", { withTimezone: true, mode: 'string' }),
+	periodEnd: timestamp("period_end", { withTimezone: true, mode: 'string' }),
 }, (table) => [
+	index("idx_dau_period").using("btree", table.periodStart.asc().nullsLast().op("timestamptz_ops"), table.periodEnd.asc().nullsLast().op("timestamptz_ops")),
+	index("idx_dau_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
+	index("idx_doctor_assignment_usage_doctor_month").using("btree", table.doctorId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("text_ops")),
 	foreignKey({
-			columns: [table.hospitalId],
-			foreignColumns: [hospitals.id],
-			name: "patients_hospital_id_fkey"
+			columns: [table.doctorId],
+			foreignColumns: [doctors.id],
+			name: "doctor_assignment_usage_doctor_id_fkey"
 		}).onDelete("cascade"),
-	check("patients_gender_check", sql`gender = ANY (ARRAY['male'::text, 'female'::text, 'other'::text, 'prefer_not_to_say'::text])`),
-	check("patients_room_type_check", sql`room_type = ANY (ARRAY['general'::text, 'private'::text, 'semi_private'::text, 'icu'::text, 'emergency'::text])`),
+	foreignKey({
+			columns: [table.subscriptionId],
+			foreignColumns: [subscriptions.id],
+			name: "doctor_assignment_usage_subscription_id_fkey"
+		}),
+	unique("doctor_assignment_usage_sub_period_key").on(table.subscriptionId, table.periodStart),
 ]);
 
 export const assignments = pgTable("assignments", {
@@ -693,10 +668,6 @@ export const assignments = pgTable("assignments", {
 	hospitalId: uuid("hospital_id").notNull(),
 	doctorId: uuid("doctor_id").notNull(),
 	patientId: uuid("patient_id").notNull(),
-	procedureId: uuid("procedure_id"),
-	procedureTypeId: uuid("procedure_type_id"),
-	roomTypeId: uuid("room_type_id"),
-	specialtyId: uuid("specialty_id"),
 	availabilitySlotId: uuid("availability_slot_id"),
 	priority: text().default('medium').notNull(),
 	status: text().default('pending').notNull(),
@@ -711,6 +682,10 @@ export const assignments = pgTable("assignments", {
 	cancelledAt: timestamp("cancelled_at", { mode: 'string' }),
 	completedAt: timestamp("completed_at", { mode: 'string' }),
 	paidAt: timestamp("paid_at", { mode: 'string' }),
+	procedureId: uuid("procedure_id"),
+	procedureTypeId: uuid("procedure_type_id"),
+	roomTypeId: uuid("room_type_id"),
+	specialtyId: uuid("specialty_id"),
 }, (table) => [
 	index("idx_assignments_doctor").using("btree", table.doctorId.asc().nullsLast().op("uuid_ops")),
 	index("idx_assignments_hospital").using("btree", table.hospitalId.asc().nullsLast().op("uuid_ops")),
@@ -738,6 +713,11 @@ export const assignments = pgTable("assignments", {
 			name: "assignments_patient_id_fkey"
 		}).onDelete("cascade"),
 	foreignKey({
+			columns: [table.priority],
+			foreignColumns: [enumPriority.priority],
+			name: "assignments_priority_fkey"
+		}),
+	foreignKey({
 			columns: [table.procedureId],
 			foreignColumns: [procedures.id],
 			name: "assignments_procedure_id_fkey"
@@ -758,11 +738,6 @@ export const assignments = pgTable("assignments", {
 			name: "assignments_specialty_id_fkey"
 		}).onDelete("set null"),
 	foreignKey({
-			columns: [table.priority],
-			foreignColumns: [enumPriority.priority],
-			name: "assignments_priority_fkey"
-		}),
-	foreignKey({
 			columns: [table.status],
 			foreignColumns: [enumStatus.status],
 			name: "assignments_status_fkey"
@@ -770,33 +745,28 @@ export const assignments = pgTable("assignments", {
 	check("assignments_cancelled_by_check", sql`cancelled_by = ANY (ARRAY['hospital'::text, 'doctor'::text, 'system'::text])`),
 ]);
 
-export const doctorAssignmentUsage = pgTable("doctor_assignment_usage", {
+export const patients = pgTable("patients", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	doctorId: uuid("doctor_id").notNull(),
-	subscriptionId: uuid("subscription_id"),
-	month: varchar({ length: 7 }).notNull(),
-	count: integer().default(0).notNull(),
-	limitCount: integer("limit_count").notNull(),
-	resetDate: timestamp("reset_date", { mode: 'string' }).notNull(),
-	periodStart: timestamp("period_start", { mode: 'string' }),
-	periodEnd: timestamp("period_end", { mode: 'string' }),
+	hospitalId: uuid("hospital_id").notNull(),
+	fullName: text("full_name").notNull(),
+	dateOfBirth: date("date_of_birth").notNull(),
+	gender: text(),
+	phone: text(),
+	emergencyContact: text("emergency_contact"),
+	address: text(),
+	medicalCondition: text("medical_condition"),
+	roomType: text("room_type"),
+	costPerDay: numeric("cost_per_day", { precision: 10, scale:  2 }),
+	medicalNotes: text("medical_notes"),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
-	index("idx_doctor_assignment_usage_doctor_month").using("btree", table.doctorId.asc().nullsLast().op("text_ops"), table.month.asc().nullsLast().op("text_ops")),
-	index("idx_dau_subscription").using("btree", table.subscriptionId.asc().nullsLast().op("uuid_ops")),
-	index("idx_dau_period").using("btree", table.periodStart.asc().nullsLast().op("timestamp_ops"), table.periodEnd.asc().nullsLast().op("timestamp_ops")),
 	foreignKey({
-			columns: [table.doctorId],
-			foreignColumns: [doctors.id],
-			name: "doctor_assignment_usage_doctor_id_fkey"
+			columns: [table.hospitalId],
+			foreignColumns: [hospitals.id],
+			name: "patients_hospital_id_fkey"
 		}).onDelete("cascade"),
-	foreignKey({
-			columns: [table.subscriptionId],
-			foreignColumns: [subscriptions.id],
-			name: "doctor_assignment_usage_subscription_id_fkey"
-		}).onDelete("cascade"),
-	unique("doctor_assignment_usage_sub_period_key").on(table.subscriptionId, table.periodStart),
+	check("patients_gender_check", sql`gender = ANY (ARRAY['male'::text, 'female'::text, 'other'::text, 'prefer_not_to_say'::text])`),
+	check("patients_room_type_check", sql`room_type = ANY (ARRAY['general'::text, 'private'::text, 'semi_private'::text, 'icu'::text, 'emergency'::text])`),
 ]);
 
 export const enumPriority = pgTable("enum_priority", {
@@ -1024,9 +994,9 @@ export const doctorProcedureFees = pgTable("doctor_procedure_fees", {
 	hospitalId: uuid("hospital_id"),
 	discountPercentage: numeric("discount_percentage", { precision: 5, scale:  2 }).default('0'),
 	status: text().default('pending'),
-    statusReason: text("status_reason"),
 	notes: text(),
 	specialtyId: uuid("specialty_id"),
+	statusReason: text("status_reason"),
 }, (table) => [
 	index("idx_doctor_procedure_fees_doctor_id").using("btree", table.doctorId.asc().nullsLast().op("uuid_ops")),
 	index("idx_doctor_procedure_fees_procedure_id").using("btree", table.procedureId.asc().nullsLast().op("uuid_ops")),
@@ -1209,16 +1179,6 @@ export const planPricing = pgTable("plan_pricing", {
 	unique("plan_pricing_plan_id_billing_cycle_key").on(table.planId, table.billingCycle),
 	check("plan_pricing_billing_cycle_check", sql`billing_cycle = ANY (ARRAY['monthly'::text, 'quarterly'::text, 'yearly'::text, 'custom'::text])`),
 ]);
-
-export const spatialRefSys = pgTable("spatial_ref_sys", {
-	srid: integer().notNull(),
-	authName: varchar("auth_name", { length: 256 }),
-	authSrid: integer("auth_srid"),
-	srtext: varchar({ length: 2048 }),
-	proj4Text: varchar({ length: 2048 }),
-}, (table) => [
-	check("spatial_ref_sys_srid_check", sql`(srid > 0) AND (srid <= 998999)`),
-]);
 //@ts-ignore
 export const subscriptions = pgTable("subscriptions", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
@@ -1294,6 +1254,41 @@ export const subscriptions = pgTable("subscriptions", {
 	check("subscriptions_status_check", sql`status = ANY (ARRAY['active'::text, 'expired'::text, 'cancelled'::text, 'suspended'::text])`),
 ]);
 
+export const chatMessages = pgTable("chat_messages", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	conversationId: uuid("conversation_id").notNull(),
+	senderType: text("sender_type").notNull(),
+	senderId: uuid("sender_id").notNull(),
+	content: text().notNull(),
+	messageType: text("message_type").default('text').notNull(),
+	replyToId: uuid("reply_to_id"),
+	isRead: boolean("is_read").default(false).notNull(),
+	readAt: timestamp("read_at", { mode: 'string' }),
+	isDeleted: boolean("is_deleted").default(false).notNull(),
+	deletedAt: timestamp("deleted_at", { mode: 'string' }),
+	isEdited: boolean("is_edited").default(false).notNull(),
+	editedAt: timestamp("edited_at", { mode: 'string' }),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	status: integer().default(1).notNull(),
+}, (table) => [
+	index("idx_chat_messages_conversation_id").using("btree", table.conversationId.asc().nullsLast().op("uuid_ops")),
+	index("idx_chat_messages_created_at").using("btree", table.createdAt.desc().nullsFirst().op("timestamp_ops")),
+	index("idx_chat_messages_sender_id").using("btree", table.senderId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [chatConversations.id],
+			name: "chat_messages_conversation_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.replyToId],
+			foreignColumns: [table.id],
+			name: "chat_messages_reply_to_id_fkey"
+		}).onDelete("set null"),
+	check("chat_messages_message_type_check", sql`message_type = ANY (ARRAY['text'::text, 'attachment'::text, 'system'::text])`),
+	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+]);
+
 export const hospitalPlanFeatures = pgTable("hospital_plan_features", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	planId: uuid("plan_id").notNull(),
@@ -1351,7 +1346,7 @@ export const doctorSpecialties = pgTable("doctor_specialties", {
 
 export const webhookEvents = pgTable("webhook_events", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity({ name: "webhook_events_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity({ name: "webhook_events_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	gatewayName: text("gateway_name").notNull(),
 	gatewayEventId: text("gateway_event_id").notNull(),
@@ -1488,3 +1483,53 @@ export const geometryColumns = pgView("geometry_columns", {	fTableCatalog: varch
 	srid: integer(),
 	type: varchar({ length: 30 }),
 }).as(sql`SELECT current_database()::character varying(256) AS f_table_catalog, n.nspname AS f_table_schema, c.relname AS f_table_name, a.attname AS f_geometry_column, COALESCE(postgis_typmod_dims(a.atttypmod), sn.ndims, 2) AS coord_dimension, COALESCE(NULLIF(postgis_typmod_srid(a.atttypmod), 0), sr.srid, 0) AS srid, replace(replace(COALESCE(NULLIF(upper(postgis_typmod_type(a.atttypmod)), 'GEOMETRY'::text), st.type, 'GEOMETRY'::text), 'ZM'::text, ''::text), 'Z'::text, ''::text)::character varying(30) AS type FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid AND NOT a.attisdropped JOIN pg_namespace n ON c.relnamespace = n.oid JOIN pg_type t ON a.atttypid = t.oid LEFT JOIN ( SELECT s.connamespace, s.conrelid, s.conkey, replace(split_part(s.consrc, ''''::text, 2), ')'::text, ''::text) AS type FROM ( SELECT pg_constraint.connamespace, pg_constraint.conrelid, pg_constraint.conkey, pg_get_constraintdef(pg_constraint.oid) AS consrc FROM pg_constraint) s WHERE s.consrc ~~* '%geometrytype(% = %'::text) st ON st.connamespace = n.oid AND st.conrelid = c.oid AND (a.attnum = ANY (st.conkey)) LEFT JOIN ( SELECT s.connamespace, s.conrelid, s.conkey, replace(split_part(s.consrc, ' = '::text, 2), ')'::text, ''::text)::integer AS ndims FROM ( SELECT pg_constraint.connamespace, pg_constraint.conrelid, pg_constraint.conkey, pg_get_constraintdef(pg_constraint.oid) AS consrc FROM pg_constraint) s WHERE s.consrc ~~* '%ndims(% = %'::text) sn ON sn.connamespace = n.oid AND sn.conrelid = c.oid AND (a.attnum = ANY (sn.conkey)) LEFT JOIN ( SELECT s.connamespace, s.conrelid, s.conkey, replace(replace(split_part(s.consrc, ' = '::text, 2), ')'::text, ''::text), '('::text, ''::text)::integer AS srid FROM ( SELECT pg_constraint.connamespace, pg_constraint.conrelid, pg_constraint.conkey, pg_get_constraintdef(pg_constraint.oid) AS consrc FROM pg_constraint) s WHERE s.consrc ~~* '%srid(% = %'::text) sr ON sr.connamespace = n.oid AND sr.conrelid = c.oid AND (a.attnum = ANY (sr.conkey)) WHERE (c.relkind = ANY (ARRAY['r'::"char", 'v'::"char", 'm'::"char", 'f'::"char", 'p'::"char"])) AND NOT c.relname = 'raster_columns'::name AND t.typname = 'geometry'::name AND NOT pg_is_other_temp_schema(c.relnamespace) AND has_table_privilege(c.oid, 'SELECT'::text)`);
+
+export const patientProfiles = pgTable("patient_profiles", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	fullName: text("full_name").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "patient_profiles_user_id_fkey"
+	}).onDelete("cascade"),
+	unique("patient_profiles_user_id_key").on(table.userId),
+]);
+
+export const patientAddresses = pgTable("patient_addresses", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	patientProfileId: uuid("patient_profile_id").notNull(),
+	label: text("label").notNull(),
+	addressText: text("address_text").notNull(),
+	latitude: numeric({ precision: 10, scale: 8 }),
+	longitude: numeric({ precision: 11, scale: 8 }),
+	isDefault: boolean("is_default").default(false).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.patientProfileId],
+		foreignColumns: [patientProfiles.id],
+		name: "patient_addresses_patient_profile_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+export const patientFamilyMembers = pgTable("patient_family_members", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	patientProfileId: uuid("patient_profile_id").notNull(),
+	fullName: text("full_name").notNull(),
+	phone: varchar("phone", { length: 20 }).notNull(),
+	relationship: text("relationship").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.patientProfileId],
+		foreignColumns: [patientProfiles.id],
+		name: "patient_family_members_patient_profile_id_fkey"
+	}).onDelete("cascade"),
+]);
+

@@ -86,7 +86,7 @@ export function getUserId(): string | null {
 /**
  * Check if user has specific role
  */
-export function hasRole(role: 'admin' | 'doctor' | 'hospital'): boolean {
+export function hasRole(role: 'admin' | 'doctor' | 'hospital' | 'patient'): boolean {
   const userRole = getUserRole();
   return userRole === role;
 }
@@ -102,6 +102,8 @@ export function getDashboardPath(role: string | null): string {
       return '/doctor/dashboard';
     case 'hospital':
       return '/hospital/dashboard';
+    case 'patient':
+      return '/patient/dashboard';
     default:
       return '/login';
   }
