@@ -13,6 +13,8 @@ export default {
     url: process.env.DATABASE_URL!,
   },
   schemaFilter: ['public'],
+  tablesFilter: ["!spatial_ref_sys"],
+
   exportFilter: {
     exclude: ['postgis'], // Exclude PostGIS system views
   },

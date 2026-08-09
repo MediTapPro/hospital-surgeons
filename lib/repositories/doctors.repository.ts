@@ -90,6 +90,37 @@ export interface DoctorQuery {
   sortOrder?: 'asc' | 'desc';
 }
 
+export interface PatientDoctorSearchParams {
+  lat: number;
+  lon: number;
+  radiusKm: number;
+  search?: string;
+  specialtyId?: string;
+  minRating?: number;
+  sortBy?: 'distance' | 'rating' | 'experience';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export interface PatientDoctorSearchRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  yearsOfExperience: number;
+  averageRating: string;
+  totalRatings: number;
+  completedAssignments: number;
+  licenseVerificationStatus: string;
+  city: string | null;
+  state: string | null;
+  distanceKm: string;
+  profilePhotoId: string | null;
+  specialties: Array<{ id: string; name: string }>;
+  photoUrl: string | null;
+  total: string;
+}
+
 type AvailabilityTemplateRow = typeof availabilityTemplates.$inferSelect;
 
 export class DoctorsRepository {
@@ -228,6 +259,166 @@ export class DoctorsRepository {
       .orderBy(desc(users.createdAt))
       .limit(limit)
       .offset(offset);
+  }
+
+  /**
+   * Search verified doctors for patients by name/specialty within a radius.
+   * Uses a single CTE query: radius filtering via PostGIS, distance calc,
+   * specialty aggregation, pagination and total count in one round-trip.
+   */
+  async searchDoctorsForPatients(params: PatientDoctorSearchParams): Promise<PatientDoctorSearchRow[]> {
+    const lat = Number(params.lat);
+    const lon = Number(params.lon);
+    const radiusKm = Number(params.radiusKm) || 50;
+    const radiusMeters = radiusKm * 1000;
+    const page = params.page || 1;
+    const limit = params.limit || 10;
+    const offset = (page - 1) * limit;
+
+    const searchTerm = params.search?.trim() ? `%${params.search.trim().toLowerCase()}%` : undefined;
+
+    const filters: ReturnType<typeof sql>[] = [];
+
+    if (searchTerm) {
+      filters.push(sql`
+        AND (
+          LOWER(d.first_name) ILIKE ${searchTerm}
+          OR LOWER(d.last_name) ILIKE ${searchTerm}
+          OR LOWER(d.first_name || ' ' || d.last_name) ILIKE ${searchTerm}
+          OR LOWER(d.last_name || ' ' || d.first_name) ILIKE ${searchTerm}
+          OR EXISTS (
+            SELECT 1
+            FROM doctor_specialties ds
+            INNER JOIN specialties s ON s.id = ds.specialty_id
+            WHERE ds.doctor_id = d.id
+              AND LOWER(s.name) ILIKE ${searchTerm}
+          )
+        )
+      `);
+    }
+
+    if (params.specialtyId) {
+      filters.push(sql`
+        AND EXISTS (
+          SELECT 1
+          FROM doctor_specialties ds
+          WHERE ds.doctor_id = d.id
+            AND ds.specialty_id = ${params.specialtyId}::uuid
+        )
+      `);
+    }
+
+    if (params.minRating !== undefined) {
+      filters.push(sql`AND COALESCE(d.average_rating, 0) >= ${params.minRating}`);
+    }
+
+    const ORDER_EXPRESSIONS: Record<'distance' | 'rating' | 'experience', string> = {
+      distance: 'dr.distance_km',
+      rating: 'COALESCE(dr.average_rating, 0)',
+      experience: 'dr.years_of_experience',
+    };
+
+    const sortKey = params.sortBy || 'distance';
+    const sortDir = params.sortOrder === 'desc' ? 'DESC' : 'ASC';
+    const orderClause = sql.raw(`${ORDER_EXPRESSIONS[sortKey]} ${sortDir} NULLS LAST, dr.id ASC`);
+
+    const query = sql`
+      WITH dr AS (
+        SELECT
+          d.id,
+          d.first_name,
+          d.last_name,
+          d.years_of_experience,
+          d.average_rating,
+          d.total_ratings,
+          d.completed_assignments,
+          d.license_verification_status,
+          d.city,
+          d.state,
+          d.profile_photo_id,
+          ROUND(
+            (
+              ST_Distance(
+                ST_SetSRID(ST_MakePoint(d.longitude::numeric, d.latitude::numeric), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(${lon}::numeric, ${lat}::numeric), 4326)::geography
+              ) / 1000.0
+            )::numeric,
+            2
+          ) AS distance_km
+        FROM doctors d
+        WHERE d.license_verification_status = 'verified'
+          AND d.latitude IS NOT NULL
+          AND d.longitude IS NOT NULL
+          AND ST_DWithin(
+            ST_SetSRID(ST_MakePoint(d.longitude::numeric, d.latitude::numeric), 4326)::geography,
+            ST_SetSRID(ST_MakePoint(${lon}::numeric, ${lat}::numeric), 4326)::geography,
+            ${radiusMeters}
+          )
+          ${sql.join(filters, sql.raw(' '))}
+      ),
+      ranked AS (
+        SELECT
+          dr.*,
+          (
+            SELECT COALESCE(
+              json_agg(
+                json_build_object('id', s.id, 'name', s.name)
+                ORDER BY ds.is_primary DESC NULLS LAST, s.name
+              ),
+              '[]'::json
+            )
+            FROM doctor_specialties ds
+            INNER JOIN specialties s ON s.id = ds.specialty_id
+            WHERE ds.doctor_id = dr.id
+          ) AS specialties,
+          (
+            SELECT f.url
+            FROM files f
+            WHERE f.id = dr.profile_photo_id
+          ) AS photo_url,
+          ROW_NUMBER() OVER (ORDER BY ${orderClause}) AS rn,
+          COUNT(*) OVER () AS total
+        FROM dr
+      )
+      SELECT
+        id,
+        first_name,
+        last_name,
+        years_of_experience,
+        average_rating,
+        total_ratings,
+        completed_assignments,
+        license_verification_status,
+        city,
+        state,
+        profile_photo_id,
+        distance_km,
+        specialties,
+        photo_url,
+        total
+      FROM ranked
+      WHERE rn > ${offset} AND rn <= ${offset + limit}
+      ORDER BY rn ASC
+    `;
+
+    const result = await this.db.execute(query);
+    return (result.rows || []).map((row: any) => ({
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      yearsOfExperience: row.years_of_experience,
+      averageRating: row.average_rating != null ? String(row.average_rating) : '0',
+      totalRatings: row.total_ratings,
+      completedAssignments: row.completed_assignments,
+      licenseVerificationStatus: row.license_verification_status,
+      city: row.city || null,
+      state: row.state || null,
+      profilePhotoId: row.profile_photo_id || null,
+      distanceKm: row.distance_km != null ? String(row.distance_km) : '0',
+      specialties: row.specialties || [],
+      photoUrl: row.photo_url || null,
+      total: String(row.total ?? 0),
+    }));
   }
 
   async updateDoctor(id: string, updateData: Partial<CreateDoctorData>) {

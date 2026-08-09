@@ -16,7 +16,7 @@ export interface CreateUserDto {
 export interface LoginUserDto {
   email: string;
   password: string;
-  accountType?: 'doctor' | 'hospital' | 'admin'; // Optional: expected account type for validation
+  accountType?: 'doctor' | 'hospital' | 'admin' | 'patient'; // Optional: expected account type for validation
 }
 
 export interface RefreshTokenDto {
@@ -33,7 +33,7 @@ export class UsersService {
   private otpRepository = new OtpRepository();
   private mailService = getMailService();
 
-  async create(createUserDto: CreateUserDto, role: 'doctor' | 'hospital' | 'admin' = 'doctor') {
+  async create(createUserDto: CreateUserDto, role: 'doctor' | 'hospital' | 'admin' | 'patient' = 'doctor') {
     try {
       // Validate password_hash is provided
       if (!createUserDto.password_hash || typeof createUserDto.password_hash !== 'string' || createUserDto.password_hash.trim() === '') {
@@ -107,10 +107,11 @@ export class UsersService {
 
       // Validate account type if provided (for security - ensure user is logging in with correct role)
       if (body.accountType && body.accountType !== 'admin') {
-        const roleToAccountType: Record<string, 'doctor' | 'hospital' | 'admin'> = {
+        const roleToAccountType: Record<string, 'doctor' | 'hospital' | 'admin' | 'patient'> = {
           'doctor': 'doctor',
           'hospital': 'hospital',
           'admin': 'admin',
+          'patient': 'patient',
         };
         
         const expectedAccountType = roleToAccountType[user[0].role];
