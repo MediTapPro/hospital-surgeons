@@ -566,6 +566,7 @@ export const availabilityTemplates = pgTable("availability_templates", {
 	recurrenceDays: text("recurrence_days"),
 	validFrom: date("valid_from").notNull(),
 	validUntil: date("valid_until"),
+	slotType: text("slot_type").default('hospital').notNull(),
 }, (table) => [
 	foreignKey({
 			columns: [table.doctorId],
@@ -574,6 +575,7 @@ export const availabilityTemplates = pgTable("availability_templates", {
 		}).onDelete("cascade"),
 	check("availability_templates_check", sql`end_time > start_time`),
 	check("availability_templates_recurrence_pattern_check", sql`recurrence_pattern = ANY (ARRAY['daily'::text, 'weekly'::text, 'monthly'::text, 'custom'::text])`),
+	check("availability_templates_slot_type_check", sql`slot_type = ANY (ARRAY['hospital'::text, 'home_visit'::text])`),
 ]);
 
 export const hospitalDepartments = pgTable("hospital_departments", {
@@ -665,10 +667,12 @@ export const doctorAssignmentUsage = pgTable("doctor_assignment_usage", {
 
 export const assignments = pgTable("assignments", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
 	doctorId: uuid("doctor_id").notNull(),
-	patientId: uuid("patient_id").notNull(),
+	patientId: uuid("patient_id"),
+	patientProfileId: uuid("patient_profile_id"),
 	availabilitySlotId: uuid("availability_slot_id"),
+	source: text().default('hospital').notNull(),
 	priority: text().default('medium').notNull(),
 	status: text().default('pending').notNull(),
 	requestedAt: timestamp("requested_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -713,6 +717,11 @@ export const assignments = pgTable("assignments", {
 			name: "assignments_patient_id_fkey"
 		}).onDelete("cascade"),
 	foreignKey({
+			columns: [table.patientProfileId],
+			foreignColumns: [patientProfiles.id],
+			name: "assignments_patient_profile_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
 			columns: [table.priority],
 			foreignColumns: [enumPriority.priority],
 			name: "assignments_priority_fkey"
@@ -742,7 +751,8 @@ export const assignments = pgTable("assignments", {
 			foreignColumns: [enumStatus.status],
 			name: "assignments_status_fkey"
 		}),
-	check("assignments_cancelled_by_check", sql`cancelled_by = ANY (ARRAY['hospital'::text, 'doctor'::text, 'system'::text])`),
+	check("assignments_cancelled_by_check", sql`cancelled_by = ANY (ARRAY['hospital'::text, 'doctor'::text, 'system'::text, 'patient'::text])`),
+	check("assignments_source_check", sql`source = ANY (ARRAY['hospital'::text, 'patient'::text])`),
 ]);
 
 export const patients = pgTable("patients", {
@@ -1385,6 +1395,7 @@ export const doctorAvailability = pgTable("doctor_availability", {
 	startTime: time("start_time").notNull(),
 	endTime: time("end_time").notNull(),
 	status: text().default('available').notNull(),
+	slotType: text("slot_type").default('hospital').notNull(),
 	isManual: boolean("is_manual").default(false),
 	bookedByHospitalId: uuid("booked_by_hospital_id"),
 	bookedAt: timestamp("booked_at", { mode: 'string' }),
@@ -1421,6 +1432,7 @@ export const doctorAvailability = pgTable("doctor_availability", {
 			name: "doctor_availability_template_id_fkey"
 		}).onDelete("set null"),
 	check("doctor_availability_check", sql`end_time > start_time`),
+	check("doctor_availability_slot_type_check", sql`slot_type = ANY (ARRAY['hospital'::text, 'home_visit'::text])`),
 ]);
 
 export const doctorLeaves = pgTable("doctor_leaves", {

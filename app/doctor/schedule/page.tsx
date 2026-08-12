@@ -15,7 +15,8 @@ interface TimeSlot {
   slotDate: string;
   startTime: string;
   endTime: string;
-  status: 'available' | 'booked';
+  status: 'available' | 'booked' | 'blocked';
+  slotType: 'hospital' | 'home_visit';
   notes?: string | null;
   templateId?: string | null;
   isManual?: boolean | null;
@@ -52,6 +53,29 @@ export default function SetAvailabilityPage() {
   const [showTemplateGenerateModal, setShowTemplateGenerateModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<{ id: string; name: string } | null>(null);
 
+  // Pagination & Filtering state
+  const [typeFilter, setTypeFilter] = useState<'all' | 'hospital' | 'home_visit'>('all');
+  const [dateFilter, setDateFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
+  const handleTypeFilterChange = (newType: 'all' | 'hospital' | 'home_visit') => {
+    setTypeFilter(newType);
+    setPage(1);
+  };
+
+  const handleDateFilterChange = (newDate: string) => {
+    setDateFilter(newDate);
+    setPage(1);
+  };
+
+  const handleLimitChange = (newLimit: number) => {
+    setLimit(newLimit);
+    setPage(1);
+  };
+
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push('/login');
@@ -62,10 +86,15 @@ export default function SetAvailabilityPage() {
 
   useEffect(() => {
     if (doctorId) {
-      fetchAvailability();
       fetchTemplates();
     }
   }, [doctorId]);
+
+  useEffect(() => {
+    if (doctorId) {
+      fetchAvailability();
+    }
+  }, [doctorId, typeFilter, dateFilter, page, limit]);
 
   const fetchDoctorProfile = async () => {
     try {
@@ -121,24 +150,41 @@ export default function SetAvailabilityPage() {
     try {
       setLoading(true);
       setError(null);
-      // Fetch only parent slots (not sub-slots) for availability display
-      // Parent slots are availability windows - they don't have "booked" status
-      const { data } = await apiClient.get(`/api/doctors/${doctorId}/availability`);
+      
+      const queryParams = new URLSearchParams();
+      if (typeFilter !== 'all') {
+        queryParams.append('type', typeFilter);
+      }
+      if (dateFilter) {
+        queryParams.append('date', dateFilter);
+      }
+      queryParams.append('page', page.toString());
+      queryParams.append('limit', limit.toString());
+
+      const { data } = await apiClient.get(`/api/doctors/${doctorId}/availability?${queryParams.toString()}`);
       if (data.success && data.data) {
-        // API returns: [{ parentSlot: {...}, bookedSubslots: [...] }]
-        // Extract only parent slots for display
         const parentSlotsData = Array.isArray(data.data) ? data.data : [];
         const formattedSlots = parentSlotsData.map((item: any) => ({
           id: item.parentSlot?.id,
           slotDate: item.parentSlot?.slotDate,
           startTime: item.parentSlot?.start,
           endTime: item.parentSlot?.end,
-          status: 'available' as const, // Parent slots are always "available" (they're just availability windows)
-          notes: null,
-          templateId: null, // Will need to fetch separately if needed
-          isManual: null,
-        })).filter((slot: any) => slot.id); // Filter out invalid slots
+          status: 'available' as const,
+          notes: item.parentSlot?.notes || null,
+          templateId: item.parentSlot?.templateId || null,
+          isManual: item.parentSlot?.isManual || null,
+          slotType: item.parentSlot?.slotType || 'hospital',
+        })).filter((slot: any) => slot.id);
+        
         setSlots(formattedSlots);
+        
+        if (data.pagination) {
+          setTotalPages(data.pagination.totalPages || 1);
+          setTotalItems(data.pagination.total || 0);
+        } else {
+          setTotalPages(1);
+          setTotalItems(formattedSlots.length);
+        }
       } else {
         setError('Failed to load availability slots');
       }
@@ -290,10 +336,11 @@ export default function SetAvailabilityPage() {
     return timeStr;
   };
 
-  // All parent slots are "available" (they're just availability windows)
-  const availableSlots = slots.length;
-  // Sub-slots (actual bookings) are shown in assignments page, not here
-  const bookedSlots = 0; // Parent slots don't have "booked" status
+  // Calculate stats - Parent slots are always "available" (they're just availability windows)
+  const availableSlots = slots.length; // All parent slots are available
+  const bookedSlots = 0; // Parent slots don't have "booked" status - bookings are in assignments
+  const hospitalSlots = slots.length; // Default to hospital for parent slots
+  const homeVisitSlots = 0; // Parent slots don't have slot type differentiation
 
   if (loading) {
     return (
@@ -413,7 +460,7 @@ export default function SetAvailabilityPage() {
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-2xl text-gray-900 mb-1 font-bold">{slots.length}</div>
+          <div className="text-2xl text-gray-900 mb-1 font-bold">{totalItems}</div>
           <div className="text-sm text-gray-600">Total Slots</div>
         </div>
         <div className="bg-white border border-green-200 rounded-lg p-4">
@@ -423,6 +470,63 @@ export default function SetAvailabilityPage() {
         <div className="bg-white border border-orange-200 rounded-lg p-4">
           <div className="text-2xl text-orange-600 mb-1 font-bold">{bookedSlots}</div>
           <div className="text-sm text-gray-600">Booked</div>
+        </div>
+      </div>
+
+      {/* Filters & Sorting */}
+      <div className="bg-white/80 backdrop-blur-md border border-gray-200/80 rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-end">
+        <div className="flex flex-col space-y-1.5 flex-1 min-w-[200px] w-full">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Slot Type</label>
+          <div className="inline-flex p-1 bg-gray-100/80 rounded-lg border border-gray-200/50 w-full md:w-auto">
+            {(['all', 'hospital', 'home_visit'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => handleTypeFilterChange(t)}
+                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200 ${
+                  typeFilter === t
+                    ? 'bg-white text-gray-900 shadow-sm border border-gray-200/40'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                {t === 'all' ? 'All Types' : t === 'hospital' ? 'Hospital' : 'Home Visit'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col space-y-1.5 flex-1 min-w-[200px] w-full">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filter by Date</label>
+          <div className="relative w-full">
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => handleDateFilterChange(e.target.value)}
+              className="w-full px-3 py-2 bg-white/50 border border-gray-200 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
+            />
+            {dateFilter && (
+              <button
+                onClick={() => handleDateFilterChange('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-medium text-red-500 hover:text-red-700 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200/60 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col space-y-1.5 w-full md:w-[120px]">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Per Page</label>
+          <select
+            value={limit}
+            onChange={(e) => handleLimitChange(Number(e.target.value))}
+            className="w-full px-3 py-2 bg-white/50 border border-gray-200 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all cursor-pointer"
+          >
+            {[5, 10, 20, 50].map((val) => (
+              <option key={val} value={val}>
+                {val} rows
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -461,6 +565,15 @@ export default function SetAvailabilityPage() {
                           Auto
                         </span>
                       )}
+                      {slot.slotType && (
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          slot.slotType === 'hospital'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                        }`}>
+                          {slot.slotType === 'hospital' ? 'Hospital' : 'Home Visit'}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <Clock className="w-4 h-4" />
@@ -473,7 +586,6 @@ export default function SetAvailabilityPage() {
                 </div>
 
                 {/* Actions */}
-                {/* Parent slots are always available (they're just availability windows) */}
                 <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleEdit(slot)}
@@ -500,6 +612,62 @@ export default function SetAvailabilityPage() {
           ))
         )}
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/80 border border-gray-200/80 rounded-xl p-4 shadow-sm">
+          <p className="text-sm text-gray-600">
+            Showing page <span className="font-semibold text-gray-900">{page}</span> of{' '}
+            <span className="font-semibold text-gray-900">{totalPages}</span>{' '}
+            {totalItems > 0 && (
+              <span className="text-xs text-gray-500">({totalItems} total slots)</span>
+            )}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1}
+              className="px-3.5 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            >
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
+                if (
+                  totalPages > 5 &&
+                  p !== 1 &&
+                  p !== totalPages &&
+                  Math.abs(p - page) > 1
+                ) {
+                  if (p === 2 && page > 3) return <span key={p} className="px-1 text-gray-400">...</span>;
+                  if (p === totalPages - 1 && page < totalPages - 2) return <span key={p} className="px-1 text-gray-400">...</span>;
+                  return null;
+                }
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`w-9 h-9 rounded-lg text-sm font-medium transition-all ${
+                      page === p
+                        ? 'bg-[#2563EB] text-white shadow-md'
+                        : 'border border-gray-200 text-gray-700 bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page === totalPages}
+              className="px-3.5 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Slot Modal */}
       {showModal && doctorId && (

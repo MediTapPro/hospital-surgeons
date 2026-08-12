@@ -590,6 +590,13 @@ export class DoctorsService {
         };
       }
 
+      if (templateDto.slotType && !['hospital', 'home_visit'].includes(templateDto.slotType)) {
+        return {
+          success: false,
+          message: 'slotType must be hospital or home_visit',
+        };
+      }
+
       const existingTemplates = await this.doctorsRepository.getAvailabilityTemplates(doctorId);
       const conflictingTemplate = existingTemplates.find((template) =>
         this.templatesConflict(
@@ -740,6 +747,13 @@ export class DoctorsService {
         };
       }
 
+      if (availabilityDto.slotType && !['hospital', 'home_visit'].includes(availabilityDto.slotType)) {
+        return {
+          success: false,
+          message: 'slotType must be hospital or home_visit',
+        };
+      }
+
       // Validate and normalize date format (YYYY-MM-DD)
       // Accept date as-is from frontend - no timezone conversion
       // The date string represents a calendar date, not a timestamp
@@ -835,6 +849,26 @@ export class DoctorsService {
         };
       }
 
+      // Prevent modification of booked slots
+      // Case 1: If it's a child slot, check if it's booked
+      if (existing.parentSlotId && existing.status === 'booked') {
+        return {
+          success: false,
+          message: 'Cannot update a booked availability slot. Cancel the booking first.',
+        };
+      }
+
+      // Case 2: If it's a parent slot, check if it has booked child slots
+      if (!existing.parentSlotId) {
+        const hasBookedChildren = await this.doctorsRepository.hasBookedChildSlots(availabilityId);
+        if (hasBookedChildren) {
+          return {
+            success: false,
+            message: 'Cannot update a slot that has booked child slots. Cancel the bookings first.',
+          };
+        }
+      }
+
       const slotDate = updateData.slotDate ?? existing.slotDate;
       const startTime = updateData.startTime ?? existing.startTime;
       const endTime = updateData.endTime ?? existing.endTime;
@@ -877,6 +911,34 @@ export class DoctorsService {
 
   async deleteAvailability(availabilityId: string) {
     try {
+      const existing = await this.doctorsRepository.getAvailabilityById(availabilityId);
+      if (!existing) {
+        return {
+          success: false,
+          message: 'Availability slot not found',
+        };
+      }
+
+      // Prevent deletion of booked slots
+      // Case 1: If it's a child slot, check if it's booked
+      if (existing.parentSlotId && existing.status === 'booked') {
+        return {
+          success: false,
+          message: 'Cannot delete a booked availability slot. Cancel the booking first.',
+        };
+      }
+
+      // Case 2: If it's a parent slot, check if it has booked child slots
+      if (!existing.parentSlotId) {
+        const hasBookedChildren = await this.doctorsRepository.hasBookedChildSlots(availabilityId);
+        if (hasBookedChildren) {
+          return {
+            success: false,
+            message: 'Cannot delete a slot that has booked child slots. Cancel the bookings first.',
+          };
+        }
+      }
+
       await this.doctorsRepository.deleteAvailability(availabilityId);
 
       return {

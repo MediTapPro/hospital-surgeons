@@ -479,6 +479,7 @@ export async function GET(
         .where(
           and(
             eq(doctorAvailability.slotDate, targetDate),
+            eq(doctorAvailability.slotType, 'hospital'),
             isNull(doctorAvailability.parentSlotId), // Only parent slots
             inArray(doctorAvailability.doctorId, doctorIds)
           )

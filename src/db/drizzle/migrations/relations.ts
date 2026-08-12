@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { subscriptionPlans, doctorPlanFeatures, patients, patientConsents, doctors, chatConversations, hospitals, users, otps, chatMessageAttachments, files, chatMessages, chatMessageReactions, specialties, procedureCategories, paymentTransactions, planPricing, subscriptions, doctorCredentials, doctorProfilePhotos, doctorPreferences, doctorAvailability, doctorAvailabilityHistory, hospitalPreferences, hospitalDocuments, hospitalUsageTracking, doctorHospitalAffiliations, availabilityTemplates, hospitalDepartments, procedures, doctorAssignmentUsage, assignments, enumPriority, procedureTypes, roomTypes, enumStatus, assignmentPayments, auditLogs, orders, assignmentRatings, hospitalCancellationFlags, notifications, enumChannel, doctorProcedureFees, analyticsEvents, supportTickets, userDevices, notificationPreferences, doctorHospitalDiscounts, hospitalPlanFeatures, notificationRecipients, doctorSpecialties, webhookEvents, doctorLeaves, procedureTypeMappings } from "./schema";
+import { subscriptionPlans, doctorPlanFeatures, patients, patientConsents, patientProfiles, doctors, chatConversations, hospitals, users, otps, chatMessageAttachments, files, chatMessages, chatMessageReactions, specialties, procedureCategories, paymentTransactions, planPricing, subscriptions, doctorCredentials, doctorProfilePhotos, doctorPreferences, doctorAvailability, doctorAvailabilityHistory, hospitalPreferences, hospitalDocuments, hospitalUsageTracking, doctorHospitalAffiliations, availabilityTemplates, hospitalDepartments, procedures, doctorAssignmentUsage, assignments, enumPriority, procedureTypes, roomTypes, enumStatus, assignmentPayments, auditLogs, orders, assignmentRatings, hospitalCancellationFlags, notifications, enumChannel, doctorProcedureFees, analyticsEvents, supportTickets, userDevices, notificationPreferences, doctorHospitalDiscounts, hospitalPlanFeatures, notificationRecipients, doctorSpecialties, webhookEvents, doctorLeaves, procedureTypeMappings } from "./schema";
 
 export const doctorPlanFeaturesRelations = relations(doctorPlanFeatures, ({one}) => ({
 	subscriptionPlan: one(subscriptionPlans, {
@@ -453,6 +453,10 @@ export const assignmentsRelations = relations(assignments, ({one, many}) => ({
 	patient: one(patients, {
 		fields: [assignments.patientId],
 		references: [patients.id]
+	}),
+	patientProfile: one(patientProfiles, {
+		fields: [assignments.patientProfileId],
+		references: [patientProfiles.id]
 	}),
 	enumPriority: one(enumPriority, {
 		fields: [assignments.priority],
