@@ -86,7 +86,7 @@ export const GET = withAuthAndContext<{ params: Promise<{ conversationId: string
       return NextResponse.json({ success: false, message: 'Failed to fetch conversation' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );
 
 /**
@@ -109,5 +109,5 @@ export const DELETE = withAuthAndContext<{ params: Promise<{ conversationId: str
       return NextResponse.json({ success: false, message: 'Failed to delete conversation' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

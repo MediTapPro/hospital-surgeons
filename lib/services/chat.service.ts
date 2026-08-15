@@ -2,15 +2,19 @@ import { withTransaction } from '@/lib/db/transaction';
 import { ChatRepository } from '@/lib/repositories/chat.repository';
 import { DoctorsRepository } from '@/lib/repositories/doctors.repository';
 import { HospitalsRepository } from '@/lib/repositories/hospitals.repository';
+import { PatientProfilesRepository } from '@/lib/repositories/patient-profiles.repository';
 import type { SendMessageDto, AddReactionDto } from '@/lib/validations/chat.dto';
 import { getDb } from '@/lib/db';
-import { doctors, hospitals } from '@/src/db/drizzle/migrations/schema';
+import { doctors, hospitals, patientProfiles } from '@/src/db/drizzle/migrations/schema';
 import { eq } from 'drizzle-orm';
+
+type ChatParty = 'doctor' | 'hospital' | 'patient';
 
 export class ChatService {
   private chatRepo = new ChatRepository();
   private doctorsRepo = new DoctorsRepository();
   private hospitalsRepo = new HospitalsRepository();
+  private patientProfilesRepo = new PatientProfilesRepository();
 
   // Resolve doctor entity id from user id
   private async resolveDoctorId(userId: string): Promise<string> {
@@ -26,11 +30,37 @@ export class ChatService {
     return hospital.id;
   }
 
+  // Resolve patient profile id from user id
+  private async resolvePatientId(userId: string): Promise<string> {
+    const profile = await this.patientProfilesRepo.findProfileByUserId(userId);
+    if (!profile) throw Object.assign(new Error('Patient profile not found'), { statusCode: 404 });
+    return profile.id;
+  }
+
+  // Determine the other party (type + entity id) in a 2-party conversation
+  private getOtherParty(
+    conversation: { hospitalId?: string | null; patientProfileId?: string | null },
+    senderType: ChatParty
+  ): { receiverType: ChatParty; receiverId: string } {
+    if (senderType === 'doctor') {
+      if (conversation.hospitalId) return { receiverType: 'hospital', receiverId: conversation.hospitalId };
+      if (conversation.patientProfileId) return { receiverType: 'patient', receiverId: conversation.patientProfileId };
+    } else if (senderType === 'hospital' || senderType === 'patient') {
+      return { receiverType: 'doctor', receiverId: '' };
+    }
+    throw Object.assign(new Error('Cannot determine conversation participant'), { statusCode: 403 });
+  }
+
   // ─── Conversations ───────────────────────────────────────────────────────────
 
-  async getOrCreateConversation(doctorId: string, hospitalId: string) {
+  async getOrCreateConversation(doctorId: string, other: { hospitalId?: string | null; patientProfileId?: string | null }) {
     return withTransaction(async (tx) => {
-      const existing = await this.chatRepo.findConversationByDoctorAndHospital(doctorId, hospitalId, tx);
+      let existing: any = null;
+      if (other.hospitalId) {
+        existing = await this.chatRepo.findConversationByDoctorAndHospital(doctorId, other.hospitalId, tx);
+      } else if (other.patientProfileId) {
+        existing = await this.chatRepo.findConversationByDoctorAndPatient(doctorId, other.patientProfileId, tx);
+      }
       if (existing) {
         if (!existing.isActive) {
           await this.chatRepo.activateConversation(existing.id, tx);
@@ -39,7 +69,7 @@ export class ChatService {
         return { conversation: existing, created: false };
       }
 
-      const conversation = await this.chatRepo.createConversation(doctorId, hospitalId, tx);
+      const conversation = await this.chatRepo.createConversation({ doctorId, ...other }, tx);
       return { conversation, created: true };
     });
   }
@@ -58,6 +88,9 @@ export class ChatService {
     } else if (userRole === 'hospital') {
       const hospitalId = await this.resolveHospitalId(userId);
       return this.chatRepo.getConversationsForHospital(hospitalId, limit, cursor);
+    } else if (userRole === 'patient') {
+      const patientProfileId = await this.resolvePatientId(userId);
+      return this.chatRepo.getConversationsForPatient(patientProfileId, limit, cursor);
     }
     throw Object.assign(new Error('Invalid user role for chat'), { statusCode: 403 });
   }
@@ -69,6 +102,9 @@ export class ChatService {
     } else if (userRole === 'hospital') {
       const hospitalId = await this.resolveHospitalId(userId);
       return this.chatRepo.getTotalUnreadCount(hospitalId, 'hospital');
+    } else if (userRole === 'patient') {
+      const patientProfileId = await this.resolvePatientId(userId);
+      return this.chatRepo.getTotalUnreadCount(patientProfileId, 'patient');
     }
     throw Object.assign(new Error('Invalid user role for chat'), { statusCode: 403 });
   }
@@ -98,7 +134,7 @@ export class ChatService {
     }
 
     const { senderId, senderType } = await this.resolveParty(userId, userRole, conversation);
-    const receiverParty: 'doctor' | 'hospital' = senderType === 'doctor' ? 'hospital' : 'doctor';
+    const { receiverType } = this.getOtherParty(conversation, senderType);
 
     // Validate replyToId belongs to this conversation
     if (body.replyToId) {
@@ -135,7 +171,7 @@ export class ChatService {
       }
 
       // Increment unread count for receiver
-      await this.chatRepo.incrementUnreadCount(conversationId, receiverParty, tx);
+      await this.chatRepo.incrementUnreadCount(conversationId, receiverType, tx);
 
       // Return enriched message with attachments
       const attachments = body.attachmentIds && body.attachmentIds.length > 0
@@ -161,7 +197,7 @@ export class ChatService {
     // Side effect: Update statuses on fetch
     try {
       const { senderType: currentUserType } = await this.resolveParty(userId, userRole, conversation);
-      const otherPartyType = currentUserType === 'doctor' ? 'hospital' : 'doctor';
+      const { receiverType: otherPartyType } = this.getOtherParty(conversation, currentUserType);
 
       // 1. Current batch -> Delivered (if from other party)
       const otherMessagesIds = result.messages
@@ -319,8 +355,8 @@ export class ChatService {
   private async resolveParty(
     userId: string,
     userRole: string,
-    conversation: { doctorId: string; hospitalId: string }
-  ): Promise<{ senderId: string; senderType: 'doctor' | 'hospital' }> {
+    conversation: { doctorId: string; hospitalId?: string | null; patientProfileId?: string | null }
+  ): Promise<{ senderId: string; senderType: ChatParty }> {
     if (userRole === 'doctor') {
       const doctor = await this.doctorsRepo.findDoctorByUserId(userId);
       if (!doctor) throw Object.assign(new Error('Doctor profile not found'), { statusCode: 404 });
@@ -335,12 +371,19 @@ export class ChatService {
         throw Object.assign(new Error('Unauthorized: not part of this conversation'), { statusCode: 403 });
       }
       return { senderId: hospital.id, senderType: 'hospital' };
+    } else if (userRole === 'patient') {
+      const profile = await this.patientProfilesRepo.findProfileByUserId(userId);
+      if (!profile) throw Object.assign(new Error('Patient profile not found'), { statusCode: 404 });
+      if (profile.id !== conversation.patientProfileId) {
+        throw Object.assign(new Error('Unauthorized: not part of this conversation'), { statusCode: 403 });
+      }
+      return { senderId: profile.id, senderType: 'patient' };
     }
     throw Object.assign(new Error('Invalid user role'), { statusCode: 403 });
   }
 
   private async verifyAccess(
-    conversation: { doctorId: string; hospitalId: string },
+    conversation: { doctorId: string; hospitalId?: string | null; patientProfileId?: string | null },
     userId: string,
     userRole: string
   ) {
@@ -405,8 +448,8 @@ export class ChatService {
   }
 
   private async sendChatPushNotification(
-    conversation: { id: string; doctorId: string; hospitalId: string },
-    senderType: 'doctor' | 'hospital',
+    conversation: { id: string; doctorId: string; hospitalId?: string | null; patientProfileId?: string | null },
+    senderType: ChatParty,
     senderId: string,
     content: string
   ) {
@@ -416,16 +459,28 @@ export class ChatService {
     let senderName = 'Someone';
 
     if (senderType === 'doctor') {
-      // Sender is doctor → receiver is hospital
+      // Sender is doctor → receiver is hospital or patient
       const [senderRow] = await db.select({ firstName: doctors.firstName, lastName: doctors.lastName }).from(doctors).where(eq(doctors.id, senderId)).limit(1);
       if (senderRow) senderName = `${senderRow.firstName} ${senderRow.lastName}`.trim() || 'Doctor';
 
-      const [receiverRow] = await db.select({ userId: hospitals.userId }).from(hospitals).where(eq(hospitals.id, conversation.hospitalId)).limit(1);
-      receiverUserId = receiverRow?.userId ?? null;
-    } else {
+      if (conversation.hospitalId) {
+        const [receiverRow] = await db.select({ userId: hospitals.userId }).from(hospitals).where(eq(hospitals.id, conversation.hospitalId)).limit(1);
+        receiverUserId = receiverRow?.userId ?? null;
+      } else if (conversation.patientProfileId) {
+        const [receiverRow] = await db.select({ userId: patientProfiles.userId }).from(patientProfiles).where(eq(patientProfiles.id, conversation.patientProfileId)).limit(1);
+        receiverUserId = receiverRow?.userId ?? null;
+      }
+    } else if (senderType === 'hospital') {
       // Sender is hospital → receiver is doctor
       const [senderRow] = await db.select({ name: hospitals.name }).from(hospitals).where(eq(hospitals.id, senderId)).limit(1);
       if (senderRow) senderName = senderRow.name ?? 'Hospital';
+
+      const [receiverRow] = await db.select({ userId: doctors.userId }).from(doctors).where(eq(doctors.id, conversation.doctorId)).limit(1);
+      receiverUserId = receiverRow?.userId ?? null;
+    } else {
+      // Sender is patient → receiver is doctor
+      const [senderRow] = await db.select({ fullName: patientProfiles.fullName }).from(patientProfiles).where(eq(patientProfiles.id, senderId)).limit(1);
+      if (senderRow) senderName = senderRow.fullName ?? 'Patient';
 
       const [receiverRow] = await db.select({ userId: doctors.userId }).from(doctors).where(eq(doctors.id, conversation.doctorId)).limit(1);
       receiverUserId = receiverRow?.userId ?? null;

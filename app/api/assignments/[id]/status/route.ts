@@ -131,9 +131,6 @@ async function patchHandler(
       );
     }
 
-    // TEMP: for testing only — allow marking bookings as completed even for future dates
-    const BYPASS_COMPLETE_TIME_CHECK = true;
-
     // Only allow 'completed' status if current time is after the scheduled start time
     if (status === 'completed' && assignmentData.availabilitySlotId) {
       const slotInfo = await db
@@ -151,7 +148,7 @@ async function patchHandler(
         const scheduledStartDateTime = new Date(`${slot.slotDate}T${slot.startTime}+05:30`);
         const now = new Date();
 
-        if (!BYPASS_COMPLETE_TIME_CHECK && now < scheduledStartDateTime) {
+        if (now < scheduledStartDateTime) {
           const timeDifferenceMs = scheduledStartDateTime.getTime() - now.getTime();
           const hoursUntilStart = timeDifferenceMs / (1000 * 60 * 60);
 

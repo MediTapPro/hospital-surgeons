@@ -1,4 +1,4 @@
-import { pgTable, foreignKey, uuid, integer, text, check, boolean, timestamp, index, unique, varchar, bigint, numeric, type AnyPgColumn, json, time, date, jsonb, primaryKey, pgView } from "drizzle-orm/pg-core"
+import { pgTable, foreignKey, uuid, integer, text, check, boolean, timestamp, index, unique, uniqueIndex, varchar, bigint, numeric, type AnyPgColumn, json, time, date, jsonb, primaryKey, pgView } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -39,16 +39,19 @@ export const patientConsents = pgTable("patient_consents", {
 export const chatConversations = pgTable("chat_conversations", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	doctorId: uuid("doctor_id").notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
+	patientProfileId: uuid("patient_profile_id"),
 	lastMessageAt: timestamp("last_message_at", { mode: 'string' }),
 	doctorUnreadCount: integer("doctor_unread_count").default(0).notNull(),
 	hospitalUnreadCount: integer("hospital_unread_count").default(0).notNull(),
+	patientUnreadCount: integer("patient_unread_count").default(0).notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
 	index("idx_chat_conversations_doctor_id").using("btree", table.doctorId.asc().nullsLast().op("uuid_ops")),
 	index("idx_chat_conversations_hospital_id").using("btree", table.hospitalId.asc().nullsLast().op("uuid_ops")),
+	index("idx_chat_conversations_patient_profile_id").using("btree", table.patientProfileId.asc().nullsLast().op("uuid_ops")),
 	index("idx_chat_conversations_updated_at").using("btree", table.updatedAt.desc().nullsFirst().op("timestamp_ops")),
 	foreignKey({
 			columns: [table.doctorId],
@@ -60,7 +63,13 @@ export const chatConversations = pgTable("chat_conversations", {
 			foreignColumns: [hospitals.id],
 			name: "chat_conversations_hospital_id_fkey"
 		}).onDelete("cascade"),
-	unique("chat_conversations_doctor_id_hospital_id_key").on(table.doctorId, table.hospitalId),
+	foreignKey({
+			columns: [table.patientProfileId],
+			foreignColumns: [patientProfiles.id],
+			name: "chat_conversations_patient_profile_id_fkey"
+		}).onDelete("cascade"),
+	uniqueIndex("chat_conversations_doctor_hospital_key").on(table.doctorId, table.hospitalId).where(sql`${table.hospitalId} IS NOT NULL`),
+	uniqueIndex("chat_conversations_doctor_patient_key").on(table.doctorId, table.patientProfileId).where(sql`${table.patientProfileId} IS NOT NULL`),
 ]);
 
 export const otps = pgTable("otps", {
@@ -134,7 +143,7 @@ export const chatMessageAttachments = pgTable("chat_message_attachments", {
 			foreignColumns: [chatMessages.id],
 			name: "chat_message_attachments_message_id_fkey"
 		}).onDelete("cascade"),
-	check("chat_message_attachments_uploaded_by_check", sql`uploaded_by = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_message_attachments_uploaded_by_check", sql`uploaded_by = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const chatMessageReactions = pgTable("chat_message_reactions", {
@@ -158,7 +167,7 @@ export const chatMessageReactions = pgTable("chat_message_reactions", {
 			name: "chat_message_reactions_message_id_fkey"
 		}).onDelete("cascade"),
 	unique("chat_message_reactions_message_id_reactor_id_key").on(table.messageId, table.reactorId),
-	check("chat_message_reactions_reactor_type_check", sql`reactor_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_message_reactions_reactor_type_check", sql`reactor_type = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const cronConfig = pgTable("cron_config", {
@@ -1296,7 +1305,7 @@ export const chatMessages = pgTable("chat_messages", {
 			name: "chat_messages_reply_to_id_fkey"
 		}).onDelete("set null"),
 	check("chat_messages_message_type_check", sql`message_type = ANY (ARRAY['text'::text, 'attachment'::text, 'system'::text])`),
-	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const hospitalPlanFeatures = pgTable("hospital_plan_features", {

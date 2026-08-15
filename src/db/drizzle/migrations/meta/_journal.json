@@ -78,6 +78,13 @@
       "when": 1768184346164,
       "tag": "0010_bizarre_squadron_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786813392605,
+      "tag": "0011_harsh_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

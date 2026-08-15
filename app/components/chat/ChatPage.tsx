@@ -17,10 +17,12 @@ import { toast } from 'sonner';
 interface Conversation {
   id: string;
   doctorId: string;
-  hospitalId: string;
+  hospitalId: string | null;
+  patientProfileId: string | null;
   lastMessageAt: string | null;
   doctorUnreadCount: number;
   hospitalUnreadCount: number;
+  patientUnreadCount: number;
   updatedAt: string;
   lastMessageContent?: string | null;
   lastMessageIsRead?: boolean | null;
@@ -29,6 +31,7 @@ interface Conversation {
   hospitalName?: string | null;
   doctorFirstName?: string | null;
   doctorLastName?: string | null;
+  patientProfileName?: string | null;
 }
 
 interface Attachment {
@@ -51,7 +54,7 @@ interface Reaction {
 interface Message {
   id: string;
   conversationId: string;
-  senderType: 'doctor' | 'hospital';
+  senderType: 'doctor' | 'hospital' | 'patient';
   senderId: string;
   content: string;
   messageType: 'text' | 'attachment' | 'system';
@@ -69,7 +72,7 @@ interface Contact {
   id: string;
   name: string;
   city: string | null;
-  type: 'doctor' | 'hospital';
+  type: 'doctor' | 'hospital' | 'patient';
   logoId?: string | null;
   profilePhotoId?: string | null;
 }
@@ -109,7 +112,7 @@ function fileUrl(attachment: Attachment) {
 
 export default function ChatPage() {
   const router = useRouter();
-  const userRole = getUserRole() as 'doctor' | 'hospital' | null;
+  const userRole = getUserRole() as 'doctor' | 'hospital' | 'patient' | null;
   const userId = getUserId();
 
   const [myEntityId, setMyEntityId] = useState('');
@@ -151,7 +154,7 @@ export default function ChatPage() {
 
   const fetchMyEntityId = async () => {
     try {
-      const profilePath = userRole === 'doctor' ? '/api/doctors/profile' : '/api/hospitals/profile';
+      const profilePath = userRole === 'doctor' ? '/api/doctors/profile' : userRole === 'hospital' ? '/api/hospitals/profile' : '/api/patients/profile';
       const res = await apiClient.get(profilePath);
       if (res.data.success) setMyEntityId(res.data.data.id);
     } catch { /* silent */ }
@@ -246,9 +249,19 @@ export default function ChatPage() {
     if (startingChat) return;
     try {
       setStartingChat(contact.id);
-      const body = userRole === 'doctor'
-        ? { doctorId: myEntityId, hospitalId: contact.id }
-        : { doctorId: contact.id, hospitalId: myEntityId };
+      let body: any;
+      if (userRole === 'doctor') {
+        // Doctor initiating: other party is a hospital or a patient
+        body = contact.type === 'patient'
+          ? { doctorId: myEntityId, patientProfileId: contact.id }
+          : { doctorId: myEntityId, hospitalId: contact.id };
+      } else if (userRole === 'patient') {
+        // Patient initiating: send own profile id (server re-resolves it)
+        body = { doctorId: contact.id, patientProfileId: myEntityId };
+      } else {
+        // Hospital initiating: other party is a doctor
+        body = { doctorId: contact.id, hospitalId: myEntityId };
+      }
 
       const res = await apiClient.post('/api/chats', body);
       if (res.data.success) {
@@ -306,7 +319,9 @@ export default function ChatPage() {
       // Update local unread count
       setConversations(prev => prev.map(c => {
         if (c.id !== convId) return c;
-        return { ...c, doctorUnreadCount: userRole === 'doctor' ? 0 : c.doctorUnreadCount, hospitalUnreadCount: userRole === 'hospital' ? 0 : c.hospitalUnreadCount };
+        if (userRole === 'doctor') return { ...c, doctorUnreadCount: 0 };
+        if (userRole === 'hospital') return { ...c, hospitalUnreadCount: 0 };
+        return { ...c, patientUnreadCount: 0 };
       }));
     } catch { /* silent */ }
   };
@@ -454,11 +469,15 @@ export default function ChatPage() {
 
   // ─── Derived data ────────────────────────────────────────────────────────────
 
-  const myParty = userRole as 'doctor' | 'hospital';
-  const otherParty = myParty === 'doctor' ? 'hospital' : 'doctor';
+  const myParty = userRole as 'doctor' | 'hospital' | 'patient';
 
   function convName(conv: Conversation) {
-    if (myParty === 'doctor') return conv.hospitalName ?? 'Hospital';
+    if (myParty === 'doctor') {
+      // Doctor sees either a hospital or patient conversation
+      if (conv.patientProfileId) return conv.patientProfileName ?? 'Patient';
+      return conv.hospitalName ?? 'Hospital';
+    }
+    // Hospital or patient sees the doctor
     return `Dr. ${conv.doctorFirstName ?? ''} ${conv.doctorLastName ?? ''}`.trim() || 'Doctor';
   }
 
@@ -467,7 +486,9 @@ export default function ChatPage() {
   }
 
   function myUnread(conv: Conversation) {
-    return myParty === 'doctor' ? conv.doctorUnreadCount : conv.hospitalUnreadCount;
+    if (myParty === 'doctor') return conv.doctorUnreadCount;
+    if (myParty === 'hospital') return conv.hospitalUnreadCount;
+    return conv.patientUnreadCount;
   }
 
   function isMine(msg: Message) {
@@ -715,7 +736,9 @@ export default function ChatPage() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-slate-800 text-sm">{convName(activeConv)}</div>
-              <div className="text-xs text-slate-400 capitalize">{otherParty}</div>
+              <div className="text-xs text-slate-400 capitalize">
+                {activeConv.patientProfileId ? 'Patient' : activeConv.hospitalId ? 'Hospital' : 'Doctor'}
+              </div>
             </div>
             <button
               onClick={() => setDeletingConvId(activeConv.id)}
@@ -759,6 +782,7 @@ export default function ChatPage() {
                     key={msg.id}
                     msg={msg}
                     isMine={isMine(msg)}
+                    myParty={myParty}
                     messages={messages}
                     onReply={() => { setReplyTo(msg); textareaRef.current?.focus(); }}
                     onEdit={() => startEdit(msg)}
@@ -891,6 +915,7 @@ export default function ChatPage() {
 interface MessageBubbleProps {
   msg: Message;
   isMine: boolean;
+  myParty: 'doctor' | 'hospital' | 'patient';
   messages: Message[];
   onReply: () => void;
   onEdit: () => void;
@@ -900,7 +925,7 @@ interface MessageBubbleProps {
   onToggleEmojiPicker: () => void;
 }
 
-function MessageBubble({ msg, isMine, messages, onReply, onEdit, onDelete, onReact, showEmojiPicker, onToggleEmojiPicker }: MessageBubbleProps) {
+function MessageBubble({ msg, isMine, myParty, messages, onReply, onEdit, onDelete, onReact, showEmojiPicker, onToggleEmojiPicker }: MessageBubbleProps) {
   const [showActions, setShowActions] = useState(false);
 
   const replyTarget = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null;
@@ -926,7 +951,7 @@ function MessageBubble({ msg, isMine, messages, onReply, onEdit, onDelete, onRea
         {replyTarget && (
           <div className={`text-xs px-3 py-1.5 mb-1 rounded-lg border-l-2 bg-slate-50 border-slate-300 max-w-full ${isMine ? 'ml-auto' : ''}`}>
             <span className="font-medium text-slate-500 block truncate">
-              {replyTarget.senderType === (isMine ? 'doctor' : 'hospital') ? 'You' : 'Them'}
+              {replyTarget.senderType === myParty ? 'You' : 'Them'}
             </span>
             <span className="text-slate-400 truncate block">{replyTarget.content}</span>
           </div>

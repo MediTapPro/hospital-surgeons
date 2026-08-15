@@ -2,8 +2,12 @@ import { z } from 'zod';
 
 export const CreateConversationDtoSchema = z.object({
   doctorId: z.string().uuid('Invalid doctor ID'),
-  hospitalId: z.string().uuid('Invalid hospital ID'),
-});
+  hospitalId: z.string().uuid('Invalid hospital ID').optional(),
+  patientProfileId: z.string().uuid('Invalid patient ID').optional(),
+}).refine(
+  (data) => (data.hospitalId ? 1 : 0) + (data.patientProfileId ? 1 : 0) === 1,
+  { message: 'Exactly one of hospitalId or patientProfileId is required' }
+);
 
 export const SendMessageDtoSchema = z.object({
   content: z.string().min(1, 'Content cannot be empty').max(5000, 'Message too long'),

@@ -81,7 +81,7 @@ export const GET = withAuth(async (req: AuthenticatedRequest) => {
         pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
       });
 
-    } else if (userRole === 'hospital') {
+    } else if (userRole === 'hospital' || userRole === 'patient') {
       const conditions = search
         ? or(
             ilike(doctors.firstName, `%${search}%`),
@@ -124,4 +124,4 @@ export const GET = withAuth(async (req: AuthenticatedRequest) => {
     console.error('GET /api/chats/contacts error:', error);
     return NextResponse.json({ success: false, message: 'Failed to fetch contacts' }, { status: 500 });
   }
-}, ['doctor', 'hospital']);
+}, ['doctor', 'hospital', 'patient']);

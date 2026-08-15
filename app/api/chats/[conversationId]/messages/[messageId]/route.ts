@@ -74,7 +74,7 @@ export const PATCH = withAuthAndContext<Params>(
       return NextResponse.json({ success: false, message: 'Failed to edit message' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );
 
 /**
@@ -124,5 +124,5 @@ export const DELETE = withAuthAndContext<Params>(
       return NextResponse.json({ success: false, message: 'Failed to delete message' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

@@ -125,4 +125,4 @@ async function postHandler(req: AuthenticatedRequest, context: { params: Promise
   }
 }
 
-export const POST = withAuthAndContext(postHandler, ['doctor', 'hospital']);
+export const POST = withAuthAndContext(postHandler, ['doctor', 'hospital', 'patient']);

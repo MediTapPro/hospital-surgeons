@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
-import { chatConversations, chatMessages, chatMessageAttachments, chatMessageReactions, files, doctors, hospitals } from '@/src/db/drizzle/migrations/schema';
+import { chatConversations, chatMessages, chatMessageAttachments, chatMessageReactions, files, doctors, hospitals, patientProfiles } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, desc, lt, lte, sql, inArray, ne } from 'drizzle-orm';
+
+export type ChatParty = 'doctor' | 'hospital' | 'patient';
 
 export class ChatRepository {
   private db = getDb();
@@ -17,6 +19,16 @@ export class ChatRepository {
     return conv || null;
   }
 
+  async findConversationByDoctorAndPatient(doctorId: string, patientProfileId: string, tx?: any) {
+    const db = tx ?? this.db;
+    const [conv] = await db
+      .select()
+      .from(chatConversations)
+      .where(and(eq(chatConversations.doctorId, doctorId), eq(chatConversations.patientProfileId, patientProfileId)))
+      .limit(1);
+    return conv || null;
+  }
+
   async findConversationById(id: string, tx?: any) {
     const db = tx ?? this.db;
     const [conv] = await db
@@ -27,11 +39,14 @@ export class ChatRepository {
     return conv || null;
   }
 
-  async createConversation(doctorId: string, hospitalId: string, tx?: any) {
+  async createConversation(data: { doctorId: string; hospitalId?: string | null; patientProfileId?: string | null }, tx?: any) {
     const db = tx ?? this.db;
+    const values: any = { doctorId: data.doctorId };
+    if (data.hospitalId) values.hospitalId = data.hospitalId;
+    if (data.patientProfileId) values.patientProfileId = data.patientProfileId;
     const [conv] = await db
       .insert(chatConversations)
-      .values({ doctorId, hospitalId })
+      .values(values)
       .returning();
     return conv;
   }
@@ -57,14 +72,17 @@ export class ChatRepository {
         id: chatConversations.id,
         doctorId: chatConversations.doctorId,
         hospitalId: chatConversations.hospitalId,
+        patientProfileId: chatConversations.patientProfileId,
         lastMessageAt: chatConversations.lastMessageAt,
         doctorUnreadCount: chatConversations.doctorUnreadCount,
         hospitalUnreadCount: chatConversations.hospitalUnreadCount,
+        patientUnreadCount: chatConversations.patientUnreadCount,
         isActive: chatConversations.isActive,
         createdAt: chatConversations.createdAt,
         updatedAt: chatConversations.updatedAt,
         hospitalName: hospitals.name,
         hospitalLogoId: hospitals.logoId,
+        patientProfileName: patientProfiles.fullName,
         lastMessageContent: sql<string | null>`(
           SELECT CASE WHEN cm.is_deleted THEN NULL
             WHEN cm.message_type = 'attachment' THEN '📎 Attachment'
@@ -88,6 +106,7 @@ export class ChatRepository {
       })
       .from(chatConversations)
       .leftJoin(hospitals, eq(chatConversations.hospitalId, hospitals.id))
+      .leftJoin(patientProfiles, eq(chatConversations.patientProfileId, patientProfiles.id))
       .where(conditions)
       .orderBy(desc(chatConversations.updatedAt))
       .limit(limit + 1);
@@ -107,9 +126,11 @@ export class ChatRepository {
         id: chatConversations.id,
         doctorId: chatConversations.doctorId,
         hospitalId: chatConversations.hospitalId,
+        patientProfileId: chatConversations.patientProfileId,
         lastMessageAt: chatConversations.lastMessageAt,
         doctorUnreadCount: chatConversations.doctorUnreadCount,
         hospitalUnreadCount: chatConversations.hospitalUnreadCount,
+        patientUnreadCount: chatConversations.patientUnreadCount,
         isActive: chatConversations.isActive,
         createdAt: chatConversations.createdAt,
         updatedAt: chatConversations.updatedAt,
@@ -147,24 +168,83 @@ export class ChatRepository {
     return { conversations: data, hasMore, nextCursor: hasMore ? data[data.length - 1].updatedAt : null };
   }
 
-  async incrementUnreadCount(conversationId: string, party: 'doctor' | 'hospital', tx?: any) {
+  async getConversationsForPatient(patientProfileId: string, limit: number, cursor?: string | Date | null, tx?: any) {
     const db = tx ?? this.db;
-    const field = party === 'doctor' ? 'doctor_unread_count' : 'hospital_unread_count';
+    const cursorStr = cursor instanceof Date ? cursor.toISOString() : cursor;
+    const conditions = cursorStr
+      ? and(eq(chatConversations.patientProfileId, patientProfileId), lt(chatConversations.updatedAt, cursorStr), eq(chatConversations.isActive, true))
+      : and(eq(chatConversations.patientProfileId, patientProfileId), eq(chatConversations.isActive, true));
+
+    const rows = await db
+      .select({
+        id: chatConversations.id,
+        doctorId: chatConversations.doctorId,
+        hospitalId: chatConversations.hospitalId,
+        patientProfileId: chatConversations.patientProfileId,
+        lastMessageAt: chatConversations.lastMessageAt,
+        doctorUnreadCount: chatConversations.doctorUnreadCount,
+        hospitalUnreadCount: chatConversations.hospitalUnreadCount,
+        patientUnreadCount: chatConversations.patientUnreadCount,
+        isActive: chatConversations.isActive,
+        createdAt: chatConversations.createdAt,
+        updatedAt: chatConversations.updatedAt,
+        doctorFirstName: doctors.firstName,
+        doctorLastName: doctors.lastName,
+        doctorProfilePhotoId: doctors.profilePhotoId,
+        lastMessageContent: sql<string | null>`(
+          SELECT CASE WHEN cm.is_deleted THEN NULL
+            WHEN cm.message_type = 'attachment' THEN '📎 Attachment'
+            ELSE cm.content END
+          FROM chat_messages cm
+          WHERE cm.conversation_id = chat_conversations.id AND cm.is_deleted = false
+          ORDER BY cm.created_at DESC LIMIT 1
+        )`,
+        lastMessageIsRead: sql<boolean | null>`(
+          SELECT cm.is_read
+          FROM chat_messages cm
+          WHERE cm.conversation_id = chat_conversations.id AND cm.is_deleted = false
+          ORDER BY cm.created_at DESC LIMIT 1
+        )`,
+        lastMessageSenderType: sql<string | null>`(
+          SELECT cm.sender_type
+          FROM chat_messages cm
+          WHERE cm.conversation_id = chat_conversations.id AND cm.is_deleted = false
+          ORDER BY cm.created_at DESC LIMIT 1
+        )`,
+      })
+      .from(chatConversations)
+      .leftJoin(doctors, eq(chatConversations.doctorId, doctors.id))
+      .where(conditions)
+      .orderBy(desc(chatConversations.updatedAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    return { conversations: data, hasMore, nextCursor: hasMore ? data[data.length - 1].updatedAt : null };
+  }
+
+  async incrementUnreadCount(conversationId: string, party: ChatParty, tx?: any) {
+    const db = tx ?? this.db;
+    let field: string;
+    let col: any;
+    if (party === 'doctor') { field = 'doctor_unread_count'; col = chatConversations.doctorUnreadCount; }
+    else if (party === 'hospital') { field = 'hospital_unread_count'; col = chatConversations.hospitalUnreadCount; }
+    else { field = 'patient_unread_count'; col = chatConversations.patientUnreadCount; }
     await db
       .update(chatConversations)
       .set({
-        [field]: sql`${party === 'doctor' ? chatConversations.doctorUnreadCount : chatConversations.hospitalUnreadCount} + 1`,
+        [field]: sql`${col} + 1`,
         updatedAt: new Date().toISOString(),
         lastMessageAt: new Date().toISOString(),
       })
       .where(eq(chatConversations.id, conversationId));
   }
 
-  async resetUnreadCount(conversationId: string, party: 'doctor' | 'hospital', tx?: any) {
+  async resetUnreadCount(conversationId: string, party: ChatParty, tx?: any) {
     const db = tx ?? this.db;
-    const patch = party === 'doctor'
-      ? { doctorUnreadCount: 0, updatedAt: new Date().toISOString() }
-      : { hospitalUnreadCount: 0, updatedAt: new Date().toISOString() };
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (party === 'doctor') patch.doctorUnreadCount = 0;
+    else if (party === 'hospital') patch.hospitalUnreadCount = 0;
+    else patch.patientUnreadCount = 0;
     await db.update(chatConversations).set(patch).where(eq(chatConversations.id, conversationId));
   }
 
@@ -191,7 +271,7 @@ export class ChatRepository {
 
   async createMessage(data: {
     conversationId: string;
-    senderType: 'doctor' | 'hospital';
+    senderType: ChatParty;
     senderId: string;
     content: string;
     messageType?: 'text' | 'attachment' | 'system';
@@ -286,7 +366,7 @@ export class ChatRepository {
     messageId: string;
     conversationId: string;
     fileId: string;
-    uploadedBy: 'doctor' | 'hospital';
+    uploadedBy: ChatParty;
   }, tx?: any) {
     const db = tx ?? this.db;
     const [attachment] = await db
@@ -391,7 +471,7 @@ export class ChatRepository {
   async createReaction(data: {
     messageId: string;
     conversationId: string;
-    reactorType: 'doctor' | 'hospital';
+    reactorType: ChatParty;
     reactorId: string;
     emoji: string;
   }, tx?: any) {
@@ -450,9 +530,8 @@ export class ChatRepository {
       .where(and(inArray(chatMessages.id, messageIds), lt(chatMessages.status, 2)));
   }
 
-  async markMessagesAsReadUpTo(conversationId: string, receiverType: 'doctor' | 'hospital', beforeDate: string | Date, tx?: any) {
+  async markMessagesAsReadUpTo(conversationId: string, senderType: ChatParty, beforeDate: string | Date, tx?: any) {
     const db = tx ?? this.db;
-    const senderType = receiverType === 'doctor' ? 'hospital' : 'doctor';
     
     const beforeDateStr = beforeDate instanceof Date ? beforeDate.toISOString() : beforeDate;
     
@@ -472,10 +551,13 @@ export class ChatRepository {
       ));
   }
 
-  async getTotalUnreadCount(entityId: string, role: 'doctor' | 'hospital', tx?: any) {
+  async getTotalUnreadCount(entityId: string, role: ChatParty, tx?: any) {
     const db = tx ?? this.db;
-    const field = role === 'doctor' ? chatConversations.doctorUnreadCount : chatConversations.hospitalUnreadCount;
-    const condition = role === 'doctor' ? eq(chatConversations.doctorId, entityId) : eq(chatConversations.hospitalId, entityId);
+    let field: any;
+    let condition: any;
+    if (role === 'doctor') { field = chatConversations.doctorUnreadCount; condition = eq(chatConversations.doctorId, entityId); }
+    else if (role === 'hospital') { field = chatConversations.hospitalUnreadCount; condition = eq(chatConversations.hospitalId, entityId); }
+    else { field = chatConversations.patientUnreadCount; condition = eq(chatConversations.patientProfileId, entityId); }
     
     const [result] = await db
       .select({ total: sql<number>`SUM(${field})` })

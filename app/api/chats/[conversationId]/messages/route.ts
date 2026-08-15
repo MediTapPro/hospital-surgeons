@@ -90,7 +90,7 @@ export const GET = withAuthAndContext<{ params: Promise<{ conversationId: string
       return NextResponse.json({ success: false, message: 'Failed to fetch messages' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );
 
 /**
@@ -118,5 +118,5 @@ export const POST = withAuthAndContext<{ params: Promise<{ conversationId: strin
       return NextResponse.json({ success: false, message: 'Failed to send message' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

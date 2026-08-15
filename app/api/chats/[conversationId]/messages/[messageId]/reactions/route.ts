@@ -89,5 +89,5 @@ export const POST = withAuthAndContext<Params>(
       return NextResponse.json({ success: false, message: 'Failed to toggle reaction' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

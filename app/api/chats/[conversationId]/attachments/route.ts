@@ -62,5 +62,5 @@ export const GET = withAuthAndContext<Params>(
       return NextResponse.json({ success: false, message: 'Failed to fetch attachments' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

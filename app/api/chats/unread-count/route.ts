@@ -37,4 +37,4 @@ export const GET = withAuth(async (req: AuthenticatedRequest) => {
     console.error('GET /api/chats/unread-count error:', error);
     return NextResponse.json({ success: false, message: 'Failed to fetch unread count' }, { status: 500 });
   }
-}, ['doctor', 'hospital']);
+}, ['doctor', 'hospital', 'patient']);

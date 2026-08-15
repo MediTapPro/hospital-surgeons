@@ -79,7 +79,7 @@ export const GET = withAuth(async (req: AuthenticatedRequest) => {
     console.error('GET /api/chats error:', error);
     return NextResponse.json({ success: false, message: 'Failed to fetch conversations' }, { status: 500 });
   }
-}, ['doctor', 'hospital']);
+}, ['doctor', 'hospital', 'patient']);
 
 /**
  * POST /api/chats
@@ -93,11 +93,11 @@ export const POST = withAuth(async (req: AuthenticatedRequest) => {
       return NextResponse.json({ success: false, message: parsed.error.issues[0].message }, { status: 400 });
     }
 
-    const { doctorId, hospitalId } = parsed.data;
+    const { doctorId, hospitalId, patientProfileId } = parsed.data;
     const { userId, userRole } = req.user!;
 
-    // Authorization: a doctor can only create conversations as themselves,
-    // a hospital can only create conversations as themselves.
+    // Authorization: a user can only create conversations as themselves.
+    let other: { hospitalId?: string; patientProfileId?: string } = {};
     if (userRole === 'doctor') {
       const { DoctorsRepository } = await import('@/lib/repositories/doctors.repository');
       const doctorsRepo = new DoctorsRepository();
@@ -105,6 +105,10 @@ export const POST = withAuth(async (req: AuthenticatedRequest) => {
       if (!doctor || doctor.id !== doctorId) {
         return NextResponse.json({ success: false, message: 'Unauthorized: doctorId mismatch' }, { status: 403 });
       }
+      // Doctor is initiating: the other party must be supplied
+      if (hospitalId) other = { hospitalId };
+      else if (patientProfileId) other = { patientProfileId };
+      else return NextResponse.json({ success: false, message: 'hospitalId or patientProfileId required' }, { status: 400 });
     } else if (userRole === 'hospital') {
       const { HospitalsRepository } = await import('@/lib/repositories/hospitals.repository');
       const hospitalsRepo = new HospitalsRepository();
@@ -112,9 +116,21 @@ export const POST = withAuth(async (req: AuthenticatedRequest) => {
       if (!hospital || hospital.id !== hospitalId) {
         return NextResponse.json({ success: false, message: 'Unauthorized: hospitalId mismatch' }, { status: 403 });
       }
+      other = { hospitalId };
+    } else if (userRole === 'patient') {
+      // Patient initiating: resolve their profile server-side, ignore client-supplied patient id
+      const { PatientProfilesRepository } = await import('@/lib/repositories/patient-profiles.repository');
+      const patientProfilesRepo = new PatientProfilesRepository();
+      const profile = await patientProfilesRepo.findProfileByUserId(userId);
+      if (!profile) {
+        return NextResponse.json({ success: false, message: 'Patient profile not found' }, { status: 404 });
+      }
+      other = { patientProfileId: profile.id };
+    } else {
+      return NextResponse.json({ success: false, message: 'Invalid user role' }, { status: 403 });
     }
 
-    const result = await chatService.getOrCreateConversation(doctorId, hospitalId);
+    const result = await chatService.getOrCreateConversation(doctorId, other);
     const statusCode = result.created ? 201 : 200;
     return NextResponse.json({ success: true, data: result.conversation }, { status: statusCode });
   } catch (error: any) {
@@ -123,4 +139,4 @@ export const POST = withAuth(async (req: AuthenticatedRequest) => {
     console.error('POST /api/chats error:', error);
     return NextResponse.json({ success: false, message: 'Failed to create conversation' }, { status: 500 });
   }
-}, ['doctor', 'hospital']);
+}, ['doctor', 'hospital', 'patient']);
