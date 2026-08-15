@@ -1545,3 +1545,47 @@ export const patientFamilyMembers = pgTable("patient_family_members", {
 	}).onDelete("cascade"),
 ]);
 
+export const homeVisitDetails = pgTable("home_visit_details", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	assignmentId: uuid("assignment_id").notNull(),
+	patientAddressId: uuid("patient_address_id"),
+	patientFamilyMemberId: uuid("patient_family_member_id"),
+	symptoms: text("symptoms"),
+	clinicalNotes: text("clinical_notes"),
+	prescription: text("prescription"),
+	attachmentFileId: uuid("attachment_file_id"),
+	// Snapshot of the saved address at booking time (display source of truth)
+	addressLabel: text("address_label"),
+	addressText: text("address_text"),
+	addressLatitude: numeric("address_latitude", { precision: 10, scale: 8 }),
+	addressLongitude: numeric("address_longitude", { precision: 11, scale: 8 }),
+	// Snapshot of the recipient (family member, or null for self) at booking time
+	recipientName: text("recipient_name"),
+	recipientPhone: text("recipient_phone"),
+	recipientRelationship: text("recipient_relationship"),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	unique("home_visit_details_assignment_id_key").on(table.assignmentId),
+	foreignKey({
+		columns: [table.assignmentId],
+		foreignColumns: [assignments.id],
+		name: "home_visit_details_assignment_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.patientAddressId],
+		foreignColumns: [patientAddresses.id],
+		name: "home_visit_details_patient_address_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.patientFamilyMemberId],
+		foreignColumns: [patientFamilyMembers.id],
+		name: "home_visit_details_patient_family_member_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.attachmentFileId],
+		foreignColumns: [files.id],
+		name: "home_visit_details_attachment_file_id_fkey"
+	}).onDelete("set null"),
+]);
+

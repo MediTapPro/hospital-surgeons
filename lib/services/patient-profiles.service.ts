@@ -127,4 +127,10 @@ export class PatientProfilesService {
     const [deleted] = await this.profilesRepo.deleteFamilyMember(memberId);
     return deleted;
   }
+
+  // --- Home Visit Bookings ---
+  async getHomeVisitBookings(userId: string) {
+    const profile = await this.getVerifiedProfile(userId);
+    return await this.profilesRepo.getPatientHomeVisitBookings(profile.id);
+  }
 }

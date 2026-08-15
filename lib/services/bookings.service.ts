@@ -229,9 +229,9 @@ export class BookingsService {
     }
   }
 
-  async getAvailableTimeSlots(doctorId: string, bookingDate: string) {
+  async getAvailableTimeSlots(doctorId: string, bookingDate: string, type: string = 'hospital') {
     try {
-      const slots = await this.bookingsRepository.getAvailableTimeSlots(doctorId, bookingDate);
+      const slots = await this.bookingsRepository.getAvailableTimeSlots(doctorId, bookingDate, type);
 
       return {
         success: true,

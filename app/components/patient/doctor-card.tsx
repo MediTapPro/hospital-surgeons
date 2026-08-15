@@ -2,6 +2,7 @@
 
 import { BadgeCheck, MapPin, Star, Stethoscope } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/app/components/ui/avatar';
+import Link from 'next/link';
 
 interface DoctorSpecialty {
   id: string;
@@ -23,6 +24,7 @@ interface DoctorCardProps {
 }
 
 export function DoctorCard({
+  id,
   name,
   primarySpecialty,
   specialties,
@@ -98,6 +100,14 @@ export function DoctorCard({
             </div>
           )}
         </div>
+      </div>
+      <div className="flex justify-end mt-4 pt-3 border-t border-slate-100/50">
+        <Link
+          href={`/patient/book-home-visit/${id}`}
+          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 transition-colors"
+        >
+          Book Home Visit
+        </Link>
       </div>
     </article>
   );

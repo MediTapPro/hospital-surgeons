@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { assignments, doctors, patients, hospitals, doctorAvailability, enumPriority } from '@/src/db/drizzle/migrations/schema';
+import { assignments, doctors, patients, hospitals, doctorAvailability, enumPriority, patientProfiles, homeVisitDetails, users } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, or, sql, desc, asc, gte, lte } from 'drizzle-orm';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 
@@ -112,11 +112,15 @@ async function getHandler(
     const selectedDate = searchParams.get('selectedDate') || undefined;
     const from = searchParams.get('from') || undefined; // YYYY-MM-DD
     const to = searchParams.get('to') || undefined; // YYYY-MM-DD
+    const source = searchParams.get('source') || undefined;
 
     // Build where conditions
     const conditions = [eq(assignments.doctorId, doctorId)];
     if (status && status !== 'all') {
       conditions.push(eq(assignments.status, status));
+    }
+    if (source && source !== 'all') {
+      conditions.push(eq(assignments.source, source));
     }
 
     // Date filter based on slot date (or requestedAt date if slot is NULL)
@@ -199,6 +203,16 @@ async function getHandler(
         // Patient info
         patientName: sql<string>`(SELECT full_name FROM patients WHERE id = ${assignments.patientId})`,
         patientCondition: sql<string>`(SELECT medical_condition FROM patients WHERE id = ${assignments.patientId})`,
+        // Home visit (patient-sourced) info
+        source: assignments.source,
+        patientProfileName: patientProfiles.fullName,
+        patientPhone: users.phone,
+        visitAddressLabel: homeVisitDetails.addressLabel,
+        visitAddress: homeVisitDetails.addressText,
+        symptoms: homeVisitDetails.symptoms,
+        recipientName: homeVisitDetails.recipientName,
+        recipientPhone: homeVisitDetails.recipientPhone,
+        recipientRelationship: homeVisitDetails.recipientRelationship,
         // Hospital info
         hospitalName: sql<string>`(SELECT name FROM hospitals WHERE id = ${assignments.hospitalId})`,
         hospitalAddress: sql<string | null>`(SELECT COALESCE(full_address, address) FROM hospitals WHERE id = ${assignments.hospitalId})`,
@@ -211,6 +225,9 @@ async function getHandler(
       .from(assignments)
       .where(whereClause)
       .leftJoin(doctorAvailability, eq(assignments.availabilitySlotId, doctorAvailability.id))
+      .leftJoin(patientProfiles, eq(assignments.patientProfileId, patientProfiles.id))
+      .leftJoin(users, eq(patientProfiles.userId, users.id))
+      .leftJoin(homeVisitDetails, eq(assignments.id, homeVisitDetails.assignmentId))
       .orderBy(
         asc(sql`COALESCE(${doctorAvailability.slotDate}, DATE(${assignments.requestedAt}::timestamp))`),
         asc(sql`COALESCE(${doctorAvailability.startTime}, (${assignments.requestedAt}::timestamp)::time)`),
@@ -222,6 +239,19 @@ async function getHandler(
       const date = assignment.slotDate || (assignment.requestedAt ? new Date(assignment.requestedAt).toISOString().split('T')[0] : null);
       const time = assignment.slotTime || 'TBD';
       const endTime = assignment.slotEndTime || null;
+
+      const isHomeVisit = assignment.source === 'patient';
+      // For patient-sourced home visits, the patient is the booking patient (or family member recipient)
+      const patientName = isHomeVisit
+        ? (assignment.recipientName || assignment.patientProfileName || 'Unknown')
+        : (assignment.patientName || 'Unknown');
+      const condition = isHomeVisit
+        ? (assignment.symptoms || 'N/A')
+        : (assignment.patientCondition || 'N/A');
+      const hospitalName = isHomeVisit ? 'Home Visit' : (assignment.hospitalName || 'Unknown');
+      const hospitalAddress = isHomeVisit
+        ? (assignment.visitAddress || null)
+        : (assignment.hospitalAddress || null);
 
       // Format time
       let formattedTime = time;
@@ -252,10 +282,18 @@ async function getHandler(
 
       return {
         id: assignment.id,
-        patient: assignment.patientName || 'Unknown',
-        condition: assignment.patientCondition || 'N/A',
-        hospital: assignment.hospitalName || 'Unknown',
-        hospitalAddress: assignment.hospitalAddress || null,
+        patient: patientName,
+        condition,
+        hospital: hospitalName,
+        hospitalAddress,
+        source: assignment.source || 'hospital',
+        patientPhone: assignment.recipientPhone || assignment.patientPhone || null,
+        visitAddress: assignment.visitAddress || null,
+        visitAddressLabel: assignment.visitAddressLabel || null,
+        symptoms: assignment.symptoms || null,
+        recipientName: assignment.recipientName || null,
+        recipientPhone: assignment.recipientPhone || null,
+        recipientRelationship: assignment.recipientRelationship || null,
         date,
         time: formattedTime,
         endTime: endTime ? (() => {
@@ -292,7 +330,8 @@ async function getHandler(
         (a) =>
           a.patient.toLowerCase().includes(searchLower) ||
           a.hospital.toLowerCase().includes(searchLower) ||
-          a.condition.toLowerCase().includes(searchLower)
+          a.condition.toLowerCase().includes(searchLower) ||
+          (a.visitAddress && a.visitAddress.toLowerCase().includes(searchLower))
       );
     }
 

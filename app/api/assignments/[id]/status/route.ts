@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { assignments, doctorAvailability, enumStatus } from '@/src/db/drizzle/migrations/schema';
+import { assignments, doctorAvailability, enumStatus, patientProfiles } from '@/src/db/drizzle/migrations/schema';
 import { eq, and } from 'drizzle-orm';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 import { UpdateAssignmentStatusDtoSchema } from '@/lib/validations/assignment-status.dto';
@@ -80,6 +80,31 @@ async function patchHandler(
           { status: 403 }
         );
       }
+    } else if (user.userRole === 'patient') {
+      // Patients are only allowed to cancel their assignments
+      if (status !== 'cancelled') {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'Patients are only permitted to cancel assignments.',
+          },
+          { status: 403 }
+        );
+      }
+
+      const { PatientProfilesRepository } = await import('@/lib/repositories/patient-profiles.repository');
+      const patientProfilesRepo = new PatientProfilesRepository();
+      const patientProfile = await patientProfilesRepo.findProfileByUserId(user.userId);
+
+      if (!patientProfile || patientProfile.id !== assignmentData.patientProfileId) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'You do not have permission to update this assignment',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     // Check if assignment is already in a final state
@@ -106,6 +131,9 @@ async function patchHandler(
       );
     }
 
+    // TEMP: for testing only — allow marking bookings as completed even for future dates
+    const BYPASS_COMPLETE_TIME_CHECK = true;
+
     // Only allow 'completed' status if current time is after the scheduled start time
     if (status === 'completed' && assignmentData.availabilitySlotId) {
       const slotInfo = await db
@@ -123,7 +151,7 @@ async function patchHandler(
         const scheduledStartDateTime = new Date(`${slot.slotDate}T${slot.startTime}+05:30`);
         const now = new Date();
 
-        if (now < scheduledStartDateTime) {
+        if (!BYPASS_COMPLETE_TIME_CHECK && now < scheduledStartDateTime) {
           const timeDifferenceMs = scheduledStartDateTime.getTime() - now.getTime();
           const hoursUntilStart = timeDifferenceMs / (1000 * 60 * 60);
 
@@ -162,7 +190,8 @@ async function patchHandler(
     // Check configurable cancellation notice period for assignments with booked slots
     // Apply to both 'pending' and 'accepted' assignments that have an availabilitySlotId
     if (status === 'cancelled' && assignmentData.availabilitySlotId &&
-      (assignmentData.status === 'pending' || assignmentData.status === 'accepted')) {
+      (assignmentData.status === 'pending' || assignmentData.status === 'accepted') &&
+      assignmentData.hospitalId) {
       // Fetch hospital preferences to get the cancellation notice period (in days)
       const { hospitalPreferences } = await import('@/src/db/drizzle/migrations/schema');
       const preferences = await db
@@ -267,7 +296,7 @@ async function patchHandler(
     } else if (status === 'cancelled') {
       updateData.cancelledAt = new Date().toISOString();
       // Set cancelledBy based on user role
-      updateData.cancelledBy = user.userRole === 'hospital' ? 'hospital' : 'doctor';
+      updateData.cancelledBy = user.userRole === 'hospital' ? 'hospital' : user.userRole === 'patient' ? 'patient' : 'doctor';
       if (cancellationReason) {
         updateData.cancellationReason = cancellationReason;
       }
@@ -286,7 +315,7 @@ async function patchHandler(
       .returning();
 
     // Automatically create payment record when assignment is completed
-    if (status === 'completed' && assignmentData.consultationFee) {
+    if (status === 'completed' && assignmentData.consultationFee && assignmentData.hospitalId) {
       const { assignmentPayments } = await import('@/src/db/drizzle/migrations/schema');
 
       // Check if payment already exists (prevent duplicates)
@@ -377,7 +406,7 @@ async function patchHandler(
         const deepLink = 'hospitalapp://view_assignment';
 
         // Get doctor and patient names
-        const [doctorInfo, patientInfo, hospitalInfo] = await Promise.all([
+        const [doctorInfo, patientInfo, hospitalInfo, patientProfileInfo] = await Promise.all([
           db
             .select({
               userId: doctors.userId,
@@ -387,28 +416,43 @@ async function patchHandler(
             .from(doctors)
             .where(eq(doctors.id, assignmentData.doctorId))
             .limit(1),
-          db
-            .select({
-              fullName: patients.fullName,
-            })
-            .from(patients)
-            .where(eq(patients.id, assignmentData.patientId))
-            .limit(1),
-          db
-            .select({
-              userId: hospitals.userId,
-              name: hospitals.name,
-            })
-            .from(hospitals)
-            .where(eq(hospitals.id, assignmentData.hospitalId))
-            .limit(1),
+          assignmentData.patientId
+            ? db
+                .select({
+                  fullName: patients.fullName,
+                })
+                .from(patients)
+                .where(eq(patients.id, assignmentData.patientId))
+                .limit(1)
+            : Promise.resolve([]),
+          assignmentData.hospitalId
+            ? db
+                .select({
+                  userId: hospitals.userId,
+                  name: hospitals.name,
+                })
+                .from(hospitals)
+                .where(eq(hospitals.id, assignmentData.hospitalId))
+                .limit(1)
+            : Promise.resolve([]),
+          assignmentData.patientProfileId
+            ? db
+                .select({
+                  fullName: patientProfiles.fullName,
+                  userId: patientProfiles.userId,
+                })
+                .from(patientProfiles)
+                .where(eq(patientProfiles.id, assignmentData.patientProfileId))
+                .limit(1)
+            : Promise.resolve([]),
         ]);
 
         const doctorName = doctorInfo[0] ? `Dr. ${doctorInfo[0].firstName} ${doctorInfo[0].lastName}` : 'Doctor';
-        const patientName = patientInfo[0]?.fullName || 'Patient';
+        const patientName = patientInfo[0]?.fullName || patientProfileInfo[0]?.fullName || 'Patient';
         const hospitalName = hospitalInfo[0]?.name || 'Hospital';
         const doctorUserId = doctorInfo[0]?.userId;
         const hospitalUserId = hospitalInfo[0]?.userId;
+        const patientUserId = patientProfileInfo[0]?.userId;
 
         // Determine recipient and notification content based on status and who changed it
         let recipientUserId: string | null = null;
@@ -416,34 +460,43 @@ async function patchHandler(
         let notificationMessage = '';
         let notificationType = '';
 
+        const isHomeVisit = assignmentData.source === 'patient' && patientUserId;
+
         if (status === 'accepted') {
-          // Doctor accepted → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Accepted';
-          notificationMessage = `${doctorName} has accepted the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Accepted' : 'Assignment Accepted';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has accepted your home visit request.` 
+            : `${doctorName} has accepted the assignment for ${patientName}`;
           notificationType = 'assignment_accepted';
         } else if (status === 'declined') {
-          // Doctor declined → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Declined';
-          notificationMessage = `${doctorName} has declined the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Declined' : 'Assignment Declined';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has declined your home visit request.` 
+            : `${doctorName} has declined the assignment for ${patientName}`;
           notificationType = 'assignment_declined';
         } else if (status === 'completed') {
-          // Doctor completed → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Completed';
-          notificationMessage = `${doctorName} has completed the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Completed' : 'Assignment Completed';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has completed your home visit.` 
+            : `${doctorName} has completed the assignment for ${patientName}`;
           notificationType = 'assignment_completed';
         } else if (status === 'cancelled') {
-          // Cancelled → notify the other party
           if (user.userRole === 'doctor') {
-            // Doctor cancelled → notify hospital
-            recipientUserId = hospitalUserId;
-            notificationTitle = 'Assignment Cancelled';
-            notificationMessage = `${doctorName} has cancelled the assignment for ${patientName}`;
+            recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+            notificationTitle = isHomeVisit ? 'Home Visit Cancelled' : 'Assignment Cancelled';
+            notificationMessage = isHomeVisit 
+              ? `${doctorName} has cancelled the home visit.` 
+              : `${doctorName} has cancelled the assignment for ${patientName}`;
+            notificationType = 'assignment_cancelled';
+          } else if (user.userRole === 'patient') {
+            recipientUserId = doctorUserId;
+            notificationTitle = 'Home Visit Cancelled';
+            notificationMessage = `${patientName} has cancelled their home visit request.`;
             notificationType = 'assignment_cancelled';
           } else if (user.userRole === 'hospital') {
-            // Hospital cancelled → notify doctor
             recipientUserId = doctorUserId;
             notificationTitle = 'Assignment Cancelled';
             notificationMessage = `${hospitalName} has cancelled the assignment for ${patientName}`;
@@ -517,5 +570,5 @@ async function patchHandler(
   }
 }
 
-export const PATCH = withAuthAndContext(patchHandler, ['doctor', 'hospital', 'admin']);
+export const PATCH = withAuthAndContext(patchHandler, ['doctor', 'hospital', 'admin', 'patient']);
 

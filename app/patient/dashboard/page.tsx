@@ -12,7 +12,6 @@ import {
   LogOut, 
   Plus, 
   Check, 
-  AlertCircle,
   FileText,
   Activity,
   Heart,
@@ -54,7 +53,7 @@ interface Booking {
   date: string;
   timeSlot: string;
   reason: string;
-  status: 'Pending' | 'Confirmed' | 'Completed';
+  status: string;
 }
 
 export default function PatientDashboardPage() {
@@ -65,19 +64,7 @@ export default function PatientDashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([
-    {
-      id: 'mock-1',
-      patientName: 'Self',
-      relationship: 'Self',
-      addressLabel: 'Home',
-      addressText: '123 Main St, Apartment 4B, Central City',
-      date: '2026-08-12',
-      timeSlot: '10:00 AM - 12:00 PM',
-      reason: 'Routine dental checkup and teeth cleaning',
-      status: 'Confirmed',
-    }
-  ]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   
   const [loading, setLoading] = useState(true);
   
@@ -98,14 +85,6 @@ export default function PatientDashboardPage() {
   
   const [profileForm, setProfileForm] = useState({
     fullName: ''
-  });
-  
-  const [bookingForm, setBookingForm] = useState({
-    patientId: 'self',
-    addressId: '',
-    date: '',
-    timeSlot: '09:00 AM - 11:00 AM',
-    reason: ''
   });
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -135,13 +114,6 @@ export default function PatientDashboardPage() {
       const addressData = addressRes.data;
       if (addressData.success && addressData.data) {
         setAddresses(addressData.data);
-        // Pre-select default address for booking form if available
-        const defaultAddr = addressData.data.find((a: Address) => a.isDefault);
-        if (defaultAddr) {
-          setBookingForm(prev => ({ ...prev, addressId: defaultAddr.id }));
-        } else if (addressData.data.length > 0) {
-          setBookingForm(prev => ({ ...prev, addressId: addressData.data[0].id }));
-        }
       }
 
       // Fetch Family Members
@@ -149,6 +121,26 @@ export default function PatientDashboardPage() {
       const familyData = familyRes.data;
       if (familyData.success && familyData.data) {
         setFamilyMembers(familyData.data);
+      }
+
+      // Fetch Home Visit Bookings
+      const bookingsRes = await apiClient.get('/api/patients/bookings');
+      const bookingsData = bookingsRes.data;
+      if (bookingsData.success && bookingsData.data) {
+        const mappedBookings: Booking[] = bookingsData.data.map((b: any) => ({
+          id: b.id,
+          patientName: b.familyMemberFullName || 'Self',
+          relationship: b.familyMemberRelationship || 'Self',
+          addressLabel: b.addressLabel || '',
+          addressText: b.addressText || '',
+          date: b.slotDate || (b.requestedAt ? b.requestedAt.split('T')[0] : ''),
+          timeSlot: b.slotStartTime
+            ? `${b.slotStartTime} - ${b.slotEndTime || ''}`
+            : '',
+          reason: b.symptoms || '',
+          status: b.status,
+        }));
+        setBookings(mappedBookings);
       }
 
     } catch (error) {
@@ -267,6 +259,198 @@ export default function PatientDashboardPage() {
     }
   };
 
+  // Family Member Edit State
+  const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
+  const [editFamilyForm, setEditFamilyForm] = useState({ fullName: '', phone: '', relationship: 'Spouse' });
+
+  const openEditMember = (member: FamilyMember) => {
+    setEditingMember(member);
+    setEditFamilyForm({
+      fullName: member.fullName,
+      phone: member.phone,
+      relationship: member.relationship,
+    });
+    setFormErrors({});
+  };
+
+  const closeEditMember = () => {
+    setEditingMember(null);
+    setFormErrors({});
+  };
+
+  // Family Member Update Submit Handler
+  const handleFamilyUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    setFormErrors({});
+
+    if (!editFamilyForm.fullName.trim()) {
+      setFormErrors(prev => ({ ...prev, fullName: 'Full name is required' }));
+      return;
+    }
+    if (!editFamilyForm.phone.trim()) {
+      setFormErrors(prev => ({ ...prev, phone: 'Phone number is required' }));
+      return;
+    }
+    if (editFamilyForm.phone.replace(/\D/g, '').length < 10) {
+      setFormErrors(prev => ({ ...prev, phone: 'Please enter a valid 10-digit phone number' }));
+      return;
+    }
+
+    setFormSubmitting(true);
+    try {
+      const res = await apiClient.put(`/api/patients/family-members/${editingMember.id}`, editFamilyForm);
+      const data = res.data;
+
+      if (data.success) {
+        toast.success('Family member updated successfully!');
+        closeEditMember();
+        // Refresh family list
+        const familyRes = await apiClient.get('/api/patients/family-members');
+        const familyData = familyRes.data;
+        if (familyData.success && familyData.data) {
+          setFamilyMembers(familyData.data);
+        }
+      } else {
+        toast.error(data.message || 'Failed to update family member');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('An error occurred. Please try again.');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  // Family Member Delete Handler
+  const handleFamilyDelete = async (member: FamilyMember) => {
+    if (!window.confirm(`Delete ${member.fullName} from your family members?`)) return;
+    setFormSubmitting(true);
+    try {
+      const res = await apiClient.delete(`/api/patients/family-members/${member.id}`);
+      const data = res.data;
+
+      if (data.success) {
+        toast.success('Family member deleted successfully!');
+        // Refresh family list
+        const familyRes = await apiClient.get('/api/patients/family-members');
+        const familyData = familyRes.data;
+        if (familyData.success && familyData.data) {
+          setFamilyMembers(familyData.data);
+        }
+      } else {
+        toast.error(data.message || 'Failed to delete family member');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('An error occurred. Please try again.');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  // Address Edit State
+  const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [editAddressForm, setEditAddressForm] = useState({
+    label: '',
+    addressText: '',
+    latitude: '',
+    longitude: '',
+    isDefault: false,
+  });
+
+  const openEditAddress = (addr: Address) => {
+    setEditingAddress(addr);
+    setEditAddressForm({
+      label: addr.label,
+      addressText: addr.addressText,
+      latitude: addr.latitude !== null && addr.latitude !== undefined ? String(addr.latitude) : '',
+      longitude: addr.longitude !== null && addr.longitude !== undefined ? String(addr.longitude) : '',
+      isDefault: addr.isDefault,
+    });
+    setFormErrors({});
+  };
+
+  const closeEditAddress = () => {
+    setEditingAddress(null);
+    setFormErrors({});
+  };
+
+  // Address Update Submit Handler
+  const handleAddressUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAddress) return;
+    setFormErrors({});
+
+    if (!editAddressForm.label.trim()) {
+      setFormErrors(prev => ({ ...prev, label: 'Label is required (e.g. Home, Work)' }));
+      return;
+    }
+    if (!editAddressForm.addressText.trim()) {
+      setFormErrors(prev => ({ ...prev, addressText: 'Address details are required' }));
+      return;
+    }
+
+    setFormSubmitting(true);
+    try {
+      const payload = {
+        label: editAddressForm.label,
+        addressText: editAddressForm.addressText,
+        latitude: editAddressForm.latitude ? parseFloat(editAddressForm.latitude) : undefined,
+        longitude: editAddressForm.longitude ? parseFloat(editAddressForm.longitude) : undefined,
+        isDefault: editAddressForm.isDefault,
+      };
+
+      const res = await apiClient.put(`/api/patients/addresses/${editingAddress.id}`, payload);
+      const data = res.data;
+
+      if (data.success) {
+        toast.success('Address updated successfully!');
+        closeEditAddress();
+        // Refresh addresses list
+        const addressRes = await apiClient.get('/api/patients/addresses');
+        const addressData = addressRes.data;
+        if (addressData.success && addressData.data) {
+          setAddresses(addressData.data);
+        }
+      } else {
+        toast.error(data.message || 'Failed to update address');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('An error occurred. Please try again.');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  // Address Delete Handler
+  const handleAddressDelete = async (addr: Address) => {
+    if (!window.confirm(`Delete the address "${addr.label}"?`)) return;
+    setFormSubmitting(true);
+    try {
+      const res = await apiClient.delete(`/api/patients/addresses/${addr.id}`);
+      const data = res.data;
+
+      if (data.success) {
+        toast.success('Address deleted successfully!');
+        // Refresh addresses list
+        const addressRes = await apiClient.get('/api/patients/addresses');
+        const addressData = addressRes.data;
+        if (addressData.success && addressData.data) {
+          setAddresses(addressData.data);
+        }
+      } else {
+        toast.error(data.message || 'Failed to delete address');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('An error occurred. Please try again.');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
   // Profile Update Submit Handler
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,73 +483,7 @@ export default function PatientDashboardPage() {
   };
 
   // Booking Submit Handler
-  const handleBookingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormErrors({});
-
-    if (!bookingForm.addressId) {
-      setFormErrors(prev => ({ ...prev, bookingAddress: 'Please select or add a saved address first' }));
-      return;
-    }
-    if (!bookingForm.date) {
-      setFormErrors(prev => ({ ...prev, bookingDate: 'Date is required' }));
-      return;
-    }
-    if (!bookingForm.reason.trim()) {
-      setFormErrors(prev => ({ ...prev, bookingReason: 'Please describe the reason for visit/symptoms' }));
-      return;
-    }
-
-    setFormSubmitting(true);
-    try {
-      // Find patient name
-      let patientName = 'Self';
-      let relationship = 'Self';
-      if (bookingForm.patientId !== 'self') {
-        const member = familyMembers.find(m => m.id === bookingForm.patientId);
-        if (member) {
-          patientName = member.fullName;
-          relationship = member.relationship;
-        }
-      }
-
-      // Find address details
-      const address = addresses.find(a => a.id === bookingForm.addressId);
-      const addressLabel = address?.label || 'Custom';
-      const addressText = address?.addressText || '';
-
-      const newBooking: Booking = {
-        id: 'mock-' + Date.now(),
-        patientName,
-        relationship,
-        addressLabel,
-        addressText,
-        date: bookingForm.date,
-        timeSlot: bookingForm.timeSlot,
-        reason: bookingForm.reason,
-        status: 'Pending'
-      };
-
-      // Mock adding home visit booking since we don't have database tables for visits yet
-      // This allows immediate feedback & functional demonstration without database limits
-      setTimeout(() => {
-        setBookings(prev => [newBooking, ...prev]);
-        toast.success('Home Visit scheduled successfully!');
-        setBookingForm(prev => ({
-          ...prev,
-          date: '',
-          reason: ''
-        }));
-        setActiveTab('overview');
-        setFormSubmitting(false);
-      }, 1000);
-
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to schedule booking.');
-      setFormSubmitting(false);
-    }
-  };
+  // (Removed: mock booking flow no longer used — real flow lives at /patient/search → /patient/book-home-visit/[doctorId])
 
   if (loading) {
     return (
@@ -409,7 +527,7 @@ export default function PatientDashboardPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab('book')}
+              onClick={() => router.push('/patient/search')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'book'
                   ? 'bg-blue-50 text-blue-700 shadow-sm'
@@ -426,6 +544,14 @@ export default function PatientDashboardPage() {
             >
               <Search className="w-4 h-4" />
               Find Doctors
+            </button>
+
+            <button
+              onClick={() => router.push('/patient/bookings')}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+            >
+              <Calendar className="w-4 h-4" />
+              My Bookings
             </button>
 
             <button
@@ -557,7 +683,7 @@ export default function PatientDashboardPage() {
                   Find a Doctor
                 </button>
                 <button
-                  onClick={() => setActiveTab('book')}
+                  onClick={() => router.push('/patient/search')}
                   className="px-5 py-2.5 bg-white/15 border border-white/30 text-white font-bold rounded-lg hover:bg-white/25 transition-colors text-sm w-fit shrink-0"
                 >
                   Schedule Visit Now
@@ -569,7 +695,12 @@ export default function PatientDashboardPage() {
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="font-bold text-slate-900">Your Scheduled Home Visits</h3>
-                <span className="text-xs font-medium text-slate-400">Showing recent first</span>
+                <button
+                  onClick={() => router.push('/patient/bookings')}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  View all →
+                </button>
               </div>
               
               {bookings.length === 0 ? (
@@ -578,7 +709,7 @@ export default function PatientDashboardPage() {
                   <p className="text-slate-600 font-medium mb-1">No scheduled visits</p>
                   <p className="text-xs text-slate-400 mb-4">Book a doctor visit for you or your family members.</p>
                   <button
-                    onClick={() => setActiveTab('book')}
+                    onClick={() => router.push('/patient/search')}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-semibold"
                   >
                     Schedule Home Visit
@@ -598,12 +729,13 @@ export default function PatientDashboardPage() {
                               {booking.relationship}
                             </span>
                           )}
-                          <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                            booking.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                            booking.status === 'Confirmed' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                          <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold capitalize ${
+                            booking.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                            booking.status === 'confirmed' || booking.status === 'in_progress' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                            booking.status === 'cancelled' || booking.status === 'expired' || booking.status === 'rejected' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
                             'bg-amber-50 text-amber-700 border border-amber-100'
                           }`}>
-                            {booking.status}
+                            {booking.status.replace(/_/g, ' ')}
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 flex items-center gap-1.5">
@@ -630,140 +762,6 @@ export default function PatientDashboardPage() {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Book Home Visit Tab Content */}
-        {activeTab === 'book' && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm max-w-xl animate-fadeIn">
-            <h3 className="text-lg font-bold text-slate-900 mb-1">Book a Doctor Home Visit</h3>
-            <p className="text-xs text-slate-500 mb-6">Schedule a verified general or specialist surgeon to visit your saved location.</p>
-
-            <form onSubmit={handleBookingSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  For Patient
-                </label>
-                <select
-                  value={bookingForm.patientId}
-                  onChange={(e) => setBookingForm(prev => ({ ...prev, patientId: e.target.value }))}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                >
-                  <option value="self">Myself ({profile?.fullName})</option>
-                  {familyMembers.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.fullName} ({member.relationship})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    Visit Address
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('addresses')}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold"
-                  >
-                    + Add New Address
-                  </button>
-                </div>
-                {addresses.length === 0 ? (
-                  <div className="p-3 bg-amber-50/50 border border-amber-100 rounded-lg text-xs text-amber-800 flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                    <div>
-                      <span>You have no saved addresses. Please go to the </span>
-                      <button 
-                        type="button" 
-                        onClick={() => setActiveTab('addresses')}
-                        className="underline font-bold"
-                      >
-                        Manage Addresses
-                      </button>
-                      <span> page to add a location first.</span>
-                    </div>
-                  </div>
-                ) : (
-                  <select
-                    value={bookingForm.addressId}
-                    onChange={(e) => setBookingForm(prev => ({ ...prev, addressId: e.target.value }))}
-                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
-                      formErrors.bookingAddress ? 'border-red-500' : 'border-slate-200'
-                    }`}
-                  >
-                    {addresses.map((addr) => (
-                      <option key={addr.id} value={addr.id}>
-                        {addr.label} - {addr.addressText}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {formErrors.bookingAddress && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.bookingAddress}</p>}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Preferred Date
-                  </label>
-                  <input
-                    type="date"
-                    min={new Date().toISOString().split('T')[0]}
-                    value={bookingForm.date}
-                    onChange={(e) => setBookingForm(prev => ({ ...prev, date: e.target.value }))}
-                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
-                      formErrors.bookingDate ? 'border-red-500' : 'border-slate-200'
-                    }`}
-                  />
-                  {formErrors.bookingDate && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.bookingDate}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    Time Slot
-                  </label>
-                  <select
-                    value={bookingForm.timeSlot}
-                    onChange={(e) => setBookingForm(prev => ({ ...prev, timeSlot: e.target.value }))}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                  >
-                    <option value="09:00 AM - 11:00 AM">09:00 AM - 11:00 AM</option>
-                    <option value="11:00 AM - 01:00 PM">11:00 AM - 01:00 PM</option>
-                    <option value="02:00 PM - 04:00 PM">02:00 PM - 04:00 PM</option>
-                    <option value="04:00 PM - 06:00 PM">04:00 PM - 06:00 PM</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Reason for Visit / Symptoms
-                </label>
-                <textarea
-                  rows={4}
-                  value={bookingForm.reason}
-                  onChange={(e) => setBookingForm(prev => ({ ...prev, reason: e.target.value }))}
-                  placeholder="Please describe symptoms, purpose of visit, or medical requests..."
-                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
-                    formErrors.bookingReason ? 'border-red-500' : 'border-slate-200'
-                  }`}
-                />
-                {formErrors.bookingReason && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.bookingReason}</p>}
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={formSubmitting || addresses.length === 0}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01]"
-                >
-                  {formSubmitting ? 'Scheduling Visit...' : 'Confirm & Request Visit'}
-                </button>
-              </div>
-            </form>
           </div>
         )}
 
@@ -807,6 +805,23 @@ export default function PatientDashboardPage() {
                           <span>Lon: {Number(addr.longitude).toFixed(4)}</span>
                         </div>
                       )}
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => openEditAddress(addr)}
+                          disabled={formSubmitting}
+                          className="flex-1 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleAddressDelete(addr)}
+                          disabled={formSubmitting}
+                          className="flex-1 px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -934,7 +949,7 @@ export default function PatientDashboardPage() {
                       <div className="w-10 h-10 bg-indigo-50 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm shrink-0">
                         {member.fullName.charAt(0)}
                       </div>
-                      <div className="overflow-hidden">
+                      <div className="overflow-hidden flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-bold text-slate-950 text-sm truncate">{member.fullName}</span>
                           <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 border border-indigo-100/30">
@@ -942,6 +957,22 @@ export default function PatientDashboardPage() {
                           </span>
                         </div>
                         <span className="block text-xs text-slate-500 font-medium">{member.phone}</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        <button
+                          onClick={() => openEditMember(member)}
+                          disabled={formSubmitting}
+                          className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleFamilyDelete(member)}
+                          disabled={formSubmitting}
+                          className="px-3 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1016,6 +1047,202 @@ export default function PatientDashboardPage() {
                 >
                   <Plus className="w-4 h-4" /> Add Family Member
                 </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Family Member Modal */}
+        {editingMember && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md animate-fadeIn">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="text-lg font-bold text-slate-900">Edit Family Member</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Update details for {editingMember.fullName}</p>
+              </div>
+              <form onSubmit={handleFamilyUpdateSubmit} className="p-6 space-y-4">
+                <div>
+                  <label htmlFor="editFullName" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Full Name *
+                  </label>
+                  <input
+                    id="editFullName"
+                    type="text"
+                    required
+                    value={editFamilyForm.fullName}
+                    onChange={(e) => setEditFamilyForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    placeholder="e.g. Jane Doe"
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
+                      formErrors.fullName ? 'border-red-500' : 'border-slate-200'
+                    }`}
+                  />
+                  {formErrors.fullName && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.fullName}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="editPhone" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Contact Phone Number *
+                  </label>
+                  <input
+                    id="editPhone"
+                    type="tel"
+                    required
+                    value={editFamilyForm.phone}
+                    onChange={(e) => setEditFamilyForm(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="e.g. 9876543210"
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
+                      formErrors.phone ? 'border-red-500' : 'border-slate-200'
+                    }`}
+                  />
+                  {formErrors.phone && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.phone}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="editRelationship" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Relationship *
+                  </label>
+                  <select
+                    id="editRelationship"
+                    value={editFamilyForm.relationship}
+                    onChange={(e) => setEditFamilyForm(prev => ({ ...prev, relationship: e.target.value }))}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  >
+                    <option value="Spouse">Spouse</option>
+                    <option value="Child">Child</option>
+                    <option value="Parent">Parent</option>
+                    <option value="Sibling">Sibling</option>
+                    <option value="Other">Other Dependency</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeEditMember}
+                    disabled={formSubmitting}
+                    className="flex-1 py-2.5 px-4 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={formSubmitting}
+                    className="flex-1 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {formSubmitting ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Address Modal */}
+        {editingAddress && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md animate-fadeIn">
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="text-lg font-bold text-slate-900">Edit Address</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Update your saved location details</p>
+              </div>
+              <form onSubmit={handleAddressUpdateSubmit} className="p-6 space-y-4">
+                <div>
+                  <label htmlFor="editAddrLabel" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Label Name *
+                  </label>
+                  <input
+                    id="editAddrLabel"
+                    type="text"
+                    required
+                    value={editAddressForm.label}
+                    onChange={(e) => setEditAddressForm(prev => ({ ...prev, label: e.target.value }))}
+                    placeholder="e.g. Home, Work, Parents"
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
+                      formErrors.label ? 'border-red-500' : 'border-slate-200'
+                    }`}
+                  />
+                  {formErrors.label && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.label}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="editAddrText" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Address Details *
+                  </label>
+                  <textarea
+                    id="editAddrText"
+                    required
+                    rows={3}
+                    value={editAddressForm.addressText}
+                    onChange={(e) => setEditAddressForm(prev => ({ ...prev, addressText: e.target.value }))}
+                    placeholder="Apartment/Flat No, Building, Street, Area, City, Pin Code"
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${
+                      formErrors.addressText ? 'border-red-500' : 'border-slate-200'
+                    }`}
+                  />
+                  {formErrors.addressText && <p className="mt-1 text-xs text-red-500 font-medium">{formErrors.addressText}</p>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="editAddrLat" className="block text-xs font-semibold text-slate-600 mb-1">
+                      Latitude (Optional)
+                    </label>
+                    <input
+                      id="editAddrLat"
+                      type="number"
+                      step="0.000001"
+                      value={editAddressForm.latitude}
+                      onChange={(e) => setEditAddressForm(prev => ({ ...prev, latitude: e.target.value }))}
+                      placeholder="e.g. 19.076"
+                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="editAddrLon" className="block text-xs font-semibold text-slate-600 mb-1">
+                      Longitude (Optional)
+                    </label>
+                    <input
+                      id="editAddrLon"
+                      type="number"
+                      step="0.000001"
+                      value={editAddressForm.longitude}
+                      onChange={(e) => setEditAddressForm(prev => ({ ...prev, longitude: e.target.value }))}
+                      placeholder="e.g. 72.877"
+                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 py-1">
+                  <input
+                    id="editAddrDefault"
+                    type="checkbox"
+                    checked={editAddressForm.isDefault}
+                    onChange={(e) => setEditAddressForm(prev => ({ ...prev, isDefault: e.target.checked }))}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="editAddrDefault" className="text-xs text-slate-700 font-semibold cursor-pointer">
+                    Set as default location
+                  </label>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeEditAddress}
+                    disabled={formSubmitting}
+                    className="flex-1 py-2.5 px-4 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={formSubmitting}
+                    className="flex-1 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {formSubmitting ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
               </form>
             </div>
           </div>
