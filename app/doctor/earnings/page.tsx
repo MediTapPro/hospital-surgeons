@@ -27,6 +27,9 @@ import apiClient from '@/lib/api/httpClient';
 interface Payment {
   id: string;
   assignmentId: string;
+  paymentSource: 'hospital_assignment' | 'home_visit';
+  patientPaymentStatus: 'not_applicable' | 'pending' | 'paid' | 'failed' | 'refunded';
+  patientPaidAt: string | null;
   consultationFee: number;
   platformCommission: number;
   doctorPayout: number;
@@ -38,8 +41,8 @@ interface Payment {
     status: string;
   };
   hospital: {
-    id: string;
-    name: string;
+    id: string | null;
+    name: string | null;
   };
   patient: {
     id: string;
@@ -54,6 +57,7 @@ export default function EarningsPaymentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [doctorId, setDoctorId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [page, setPage] = useState(1);
@@ -72,7 +76,7 @@ export default function EarningsPaymentsPage() {
     if (doctorId) {
       fetchPayments();
     }
-  }, [doctorId, statusFilter, page]);
+  }, [doctorId, statusFilter, sourceFilter, page]);
 
   const fetchDoctorProfile = async () => {
     try {
@@ -107,6 +111,9 @@ export default function EarningsPaymentsPage() {
       
       if (statusFilter !== 'all') {
         params.append('status', statusFilter);
+      }
+      if (sourceFilter !== 'all') {
+        params.append('source', sourceFilter);
       }
 
       const response = await apiClient.get(`/api/doctors/${doctorId}/payments?${params.toString()}`);
@@ -262,6 +269,19 @@ export default function EarningsPaymentsPage() {
               </SelectContent>
             </Select>
           </div>
+          <Select value={sourceFilter} onValueChange={(value) => {
+            setSourceFilter(value);
+            setPage(1);
+          }}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter by source" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All payment sources</SelectItem>
+              <SelectItem value="hospital_assignment">Hospital assignments</SelectItem>
+              <SelectItem value="home_visit">Home visits</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -287,10 +307,12 @@ export default function EarningsPaymentsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Assignment ID</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Hospital</TableHead>
                   <TableHead>Patient</TableHead>
                   <TableHead>Fee</TableHead>
                   <TableHead>Payout</TableHead>
+                  <TableHead>Patient Payment</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Completed At</TableHead>
                   <TableHead>Paid At</TableHead>
@@ -304,9 +326,14 @@ export default function EarningsPaymentsPage() {
                       {payment.assignmentId.substring(0, 8)}...
                     </TableCell>
                     <TableCell>
+                      <Badge className={payment.paymentSource === 'home_visit' ? 'bg-teal-100 text-teal-800' : 'bg-slate-100 text-slate-800'}>
+                        {payment.paymentSource === 'home_visit' ? 'Home visit' : 'Hospital'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-gray-400" />
-                        <span>{payment.hospital.name}</span>
+                        <span>{payment.hospital.name || '—'}</span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -320,6 +347,9 @@ export default function EarningsPaymentsPage() {
                     </TableCell>
                     <TableCell className="font-medium text-green-600">
                       {formatCurrency(payment.doctorPayout)}
+                    </TableCell>
+                    <TableCell>
+                      {payment.paymentSource === 'home_visit' ? getStatusBadge(payment.patientPaymentStatus === 'paid' ? 'completed' : payment.patientPaymentStatus) : '—'}
                     </TableCell>
                     <TableCell>
                       {getStatusBadge(payment.paymentStatus)}

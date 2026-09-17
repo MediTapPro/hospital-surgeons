@@ -210,6 +210,8 @@ export class HomeVisitsRepository {
     recipientRelationship: string | null;
 		paymentMode: 'free_trial' | 'pay_after_completion';
 		isFreeTrial: boolean;
+		platformCommission: string;
+		doctorPayout: string;
   }, tx?: any) {
     const client = tx || this.db;
     const result = await client

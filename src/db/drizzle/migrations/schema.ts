@@ -796,11 +796,16 @@ export const enumPriority = pgTable("enum_priority", {
 export const assignmentPayments = pgTable("assignment_payments", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	assignmentId: uuid("assignment_id").notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
 	doctorId: uuid("doctor_id").notNull(),
 	consultationFee: numeric("consultation_fee", { precision: 10, scale:  2 }).notNull(),
 	platformCommission: numeric("platform_commission", { precision: 10, scale:  2 }).default('0.00').notNull(),
 	doctorPayout: numeric("doctor_payout", { precision: 10, scale:  2 }).notNull(),
+	paymentSource: text("payment_source").default('hospital_assignment').notNull(),
+	patientPaymentStatus: text("patient_payment_status").default('not_applicable').notNull(),
+	patientPaidAt: timestamp("patient_paid_at", { mode: 'string' }),
+	paymentTransactionId: uuid("payment_transaction_id"),
+	paymentOrderId: uuid("payment_order_id"),
 	paymentStatus: text("payment_status").default('pending').notNull(),
 	paidToDoctorAt: timestamp("paid_to_doctor_at", { mode: 'string' }),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -822,8 +827,15 @@ export const assignmentPayments = pgTable("assignment_payments", {
 			name: "assignment_payments_hospital_id_fkey"
 		}).onDelete("cascade"),
 	unique("assignment_payments_assignment_id_key").on(table.assignmentId),
+	index("idx_assignment_payments_payment_source").using("btree", table.paymentSource.asc().nullsLast().op("text_ops")),
+	index("idx_assignment_payments_patient_payment_status").using("btree", table.patientPaymentStatus.asc().nullsLast().op("text_ops")),
+	index("idx_assignment_payments_payment_transaction_id").using("btree", table.paymentTransactionId.asc().nullsLast().op("uuid_ops")),
 	check("assignment_payments_payment_method_check", sql`(payment_method IS NULL) OR (payment_method = ANY (ARRAY['upi'::text, 'cash'::text, 'online'::text]))`),
+	// Matches lib/enums/assignment-payments.enums.ts.
 	check("assignment_payments_payment_status_check", sql`payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text])`),
+	check("assignment_payments_payment_source_check", sql`payment_source = ANY (ARRAY['hospital_assignment'::text, 'home_visit'::text])`),
+	check("assignment_payments_patient_payment_status_check", sql`patient_payment_status = ANY (ARRAY['not_applicable'::text, 'pending'::text, 'paid'::text, 'failed'::text, 'refunded'::text])`),
+	check("assignment_payments_source_consistency_check", sql`(payment_source = 'hospital_assignment'::text AND hospital_id IS NOT NULL AND patient_payment_status = 'not_applicable'::text) OR (payment_source = 'home_visit'::text AND hospital_id IS NULL)`),
 ]);
 
 export const auditLogs = pgTable("audit_logs", {
@@ -1582,6 +1594,8 @@ export const homeVisitDetails = pgTable("home_visit_details", {
 	// the shared hospital-to-doctor payment workflow.
 	paymentMode: text("payment_mode").default('free_trial').notNull(),
 	isFreeTrial: boolean("is_free_trial").default(true).notNull(),
+	platformCommission: numeric("platform_commission", { precision: 10, scale: 2 }).default('0.00').notNull(),
+	doctorPayout: numeric("doctor_payout", { precision: 10, scale: 2 }).default('0.00').notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [

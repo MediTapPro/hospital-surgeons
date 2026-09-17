@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { paymentManager } from '@/app/api/lib/payment-gate-ways/payment-gateway-manager';
 import { RazorpayGateway } from '@/app/api/lib/payment-gate-ways/gatways/razorpay';
 import { getDb } from '@/lib/db';
-import { assignments, homeVisitDetails, orders, paymentTransactions, webhookEvents, subscriptions, planPricing, subscriptionPlans } from '@/src/db/drizzle/migrations/schema';
+import { assignmentPayments, assignments, homeVisitDetails, orders, paymentTransactions, webhookEvents, subscriptions, planPricing, subscriptionPlans } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, asc, isNull, sql } from 'drizzle-orm';
 import crypto from 'crypto';
 import { SubscriptionsService } from '@/lib/services/subscriptions.service';
@@ -12,7 +12,7 @@ import { SubscriptionsService } from '@/lib/services/subscriptions.service';
  * /api/payments/verify:
  *   post:
  *     summary: Verify payment after successful transaction
- *     description: Verifies Razorpay payment signature, updates order status, creates payment transaction record, and creates subscription if payment is successful. Also handles upgrades and billing cycle changes automatically.
+ *     description: Verifies a Razorpay payment. For a completed paid home visit, it atomically records the patient payment and makes the doctor settlement pending. Subscription flows keep their existing lifecycle.
  *     tags: [Payments]
  *     requestBody:
  *       required: true
@@ -204,6 +204,7 @@ export async function POST(req: NextRequest) {
 
     const paymentTransaction = await getDb().transaction(async (tx) => {
       await tx.execute(sql`SELECT id FROM orders WHERE id = ${dbOrder.id} FOR UPDATE`);
+      let homeVisitAssignmentId: string | null = null;
 
       const [lockedOrder] = await tx
         .select()
@@ -250,6 +251,8 @@ export async function POST(req: NextRequest) {
             throw new Error('Consultation payment is not eligible for completion');
           }
 
+          homeVisitAssignmentId = lockedOrder.assignmentId;
+
           await tx
             .update(assignments)
             .set({ paidAt: new Date().toISOString() })
@@ -285,6 +288,27 @@ export async function POST(req: NextRequest) {
         .limit(1);
 
       if (existingTransaction) {
+        if (homeVisitAssignmentId) {
+          const updatedPayment = await tx
+            .update(assignmentPayments)
+            .set({
+              patientPaymentStatus: 'paid',
+              patientPaidAt: new Date().toISOString(),
+              paymentTransactionId: existingTransaction.id,
+              paymentOrderId: lockedOrder.id,
+              paymentStatus: 'pending',
+            })
+            .where(
+              and(
+                eq(assignmentPayments.assignmentId, homeVisitAssignmentId),
+                eq(assignmentPayments.paymentSource, 'home_visit')
+              )
+            )
+            .returning({ id: assignmentPayments.id });
+          if (updatedPayment.length === 0) {
+            throw new Error('HOME_VISIT_SETTLEMENT_NOT_FOUND');
+          }
+        }
         return existingTransaction;
       }
 
@@ -314,6 +338,28 @@ export async function POST(req: NextRequest) {
 
       if (!createdTransaction) {
         throw new Error('Failed to create payment transaction');
+      }
+
+      if (homeVisitAssignmentId) {
+        const updatedPayment = await tx
+          .update(assignmentPayments)
+          .set({
+            patientPaymentStatus: 'paid',
+            patientPaidAt: new Date().toISOString(),
+            paymentTransactionId: createdTransaction.id,
+            paymentOrderId: lockedOrder.id,
+            paymentStatus: 'pending',
+          })
+          .where(
+            and(
+              eq(assignmentPayments.assignmentId, homeVisitAssignmentId),
+              eq(assignmentPayments.paymentSource, 'home_visit')
+            )
+          )
+          .returning({ id: assignmentPayments.id });
+        if (updatedPayment.length === 0) {
+          throw new Error('HOME_VISIT_SETTLEMENT_NOT_FOUND');
+        }
       }
 
       return createdTransaction;

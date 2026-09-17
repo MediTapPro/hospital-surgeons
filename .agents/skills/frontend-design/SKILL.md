@@ -8,6 +8,7 @@ description: Standards and conventions for writing frontend code in the hospital
 ## 1. Constants & Localization
 
 - **Non-Localized Constants**: All internal state values, query keys, system identifiers, and configuration strings must be imported from a central constants file (e.g. `lib/utils/constants.ts`). Never hardcode them inline.
+- **Domain Enums**: Import reusable status, source, and mode values from the central enums module. Do not recreate string unions or option values inside components.
 - **User-Facing Strings**: All user-facing strings must use translation helpers or standard internationalization utilities (e.g. `t()`). Text assets must reside in translation files, not inline in React components.
 
 ## 2. Styling — Tailwind CSS First, No Inline Styles

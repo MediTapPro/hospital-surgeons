@@ -253,6 +253,8 @@ export class HomeVisitsService {
     let newAssignment: any;
     let bookingMode: 'free_trial' | 'pay_after_completion' = 'pay_after_completion';
     let isFreeTrial = false;
+    let platformCommission = '0.00';
+    let doctorPayout = '0.00';
 
     try {
       await this.db.transaction(async (tx) => {
@@ -275,6 +277,15 @@ export class HomeVisitsService {
 
         if (!isFreeTrial && (!resolvedFee || Number(resolvedFee) <= 0)) {
           throw new Error('HOME_VISIT_FEE_NOT_CONFIGURED');
+        }
+
+        if (!isFreeTrial && resolvedFee) {
+          const commissionPercentage = feeRes.success && feeRes.data
+            ? feeRes.data.platformCommissionPercentage
+            : 0;
+          const feeAmount = Number(resolvedFee);
+          platformCommission = ((feeAmount * commissionPercentage) / 100).toFixed(2);
+          doctorPayout = (feeAmount - Number(platformCommission)).toFixed(2);
         }
 
         await this.homeVisitsRepo.ensurePriorityExists(priority, tx);
@@ -325,6 +336,8 @@ export class HomeVisitsService {
           recipientRelationship: familyMember?.relationship ?? null,
           paymentMode: bookingMode,
           isFreeTrial,
+          platformCommission,
+          doctorPayout,
         }, tx);
 
         await this.incrementAssignmentUsage(doctorId, tx);

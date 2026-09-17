@@ -16,7 +16,8 @@ import {
   Activity,
   Heart,
   Search,
-  MessageSquare
+  MessageSquare,
+  CreditCard
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAuthenticated, getUserRole } from '@/lib/auth/utils';
@@ -553,6 +554,15 @@ export default function PatientDashboardPage() {
             >
               <Calendar className="w-4 h-4" />
               My Bookings
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push('/patient/payments')}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+            >
+              <CreditCard className="w-4 h-4" />
+              Payments
             </button>
 
             <button

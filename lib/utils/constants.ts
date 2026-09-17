@@ -25,6 +25,12 @@ export const PATIENT_SEARCH_LOCATION_GPS = 'gps';
 
 export const HOME_VISIT_SETTINGS_SCOPE = 'global';
 
+export const PATIENT_PAYMENTS_DEFAULT_LIMIT = 10;
+export const PATIENT_PAYMENTS_MAX_LIMIT = 50;
+
+export const ASSIGNMENT_PAYMENTS_DEFAULT_LIMIT = 20;
+export const ASSIGNMENT_PAYMENTS_MAX_LIMIT = 50;
+
 export const HOME_VISIT_PAYMENT_TIMINGS = [
   {
     value: 'pay_after_completion',
