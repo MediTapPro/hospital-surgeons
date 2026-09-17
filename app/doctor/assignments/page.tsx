@@ -63,6 +63,9 @@ interface Assignment {
   recipientName?: string | null;
   recipientPhone?: string | null;
   recipientRelationship?: string | null;
+  platformCommissionPercentage?: number;
+  platformCommission?: number;
+  doctorPayout?: number;
 }
 
 export default function AssignmentsPage() {
@@ -923,12 +926,29 @@ export default function AssignmentsPage() {
                 </Alert>
               )}
 
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-900">Consultation Fee</span>
-                  <span className="text-blue-900 font-semibold">₹{selectedAssignment.fee}</span>
+              {selectedAssignment.source === 'patient' ? (
+                <div className="p-4 bg-blue-50 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between font-semibold text-blue-900 border-b border-blue-200 pb-2">
+                    <span>Consultation Fee</span>
+                    <span>₹{selectedAssignment.fee.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-blue-700">
+                    <span>Platform Commission ({selectedAssignment.platformCommissionPercentage || 0}%)</span>
+                    <span>- ₹{(selectedAssignment.platformCommission || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-bold text-teal-800 text-sm pt-1">
+                    <span>Doctor Payout</span>
+                    <span>₹{(selectedAssignment.doctorPayout || 0).toFixed(2)}</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-4 bg-blue-50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-blue-900">Consultation Fee</span>
+                    <span className="text-blue-900 font-semibold">₹{selectedAssignment.fee}</span>
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons for Pending Assignments */}
               {selectedAssignment.status === 'pending' && (

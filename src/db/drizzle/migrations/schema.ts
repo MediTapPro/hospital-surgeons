@@ -867,6 +867,7 @@ export const orders = pgTable("orders", {
 	orderType: text("order_type").notNull(),
 	planId: uuid("plan_id"),
 	pricingId: uuid("pricing_id"),
+	assignmentId: uuid("assignment_id"),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	amount: bigint({ mode: "number" }).notNull(),
 	currency: text().default('USD').notNull(),
@@ -897,6 +898,11 @@ export const orders = pgTable("orders", {
 			foreignColumns: [users.id],
 			name: "orders_user_id_fkey"
 		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.assignmentId],
+			foreignColumns: [assignments.id],
+			name: "orders_assignment_id_fkey"
+		}).onDelete("set null"),
 	check("orders_order_type_check", sql`order_type = ANY (ARRAY['subscription'::text, 'consultation'::text, 'other'::text])`),
 	check("orders_status_check", sql`status = ANY (ARRAY['pending'::text, 'paid'::text, 'failed'::text, 'expired'::text, 'refunded'::text])`),
 	check("orders_user_role_check", sql`(user_role IS NULL) OR (user_role = ANY (ARRAY['doctor'::text, 'hospital'::text]))`),
@@ -1572,6 +1578,10 @@ export const homeVisitDetails = pgTable("home_visit_details", {
 	recipientName: text("recipient_name"),
 	recipientPhone: text("recipient_phone"),
 	recipientRelationship: text("recipient_relationship"),
+	// Booking-time payment decision. These are home-visit-only and do not alter
+	// the shared hospital-to-doctor payment workflow.
+	paymentMode: text("payment_mode").default('free_trial').notNull(),
+	isFreeTrial: boolean("is_free_trial").default(true).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
@@ -1596,5 +1606,40 @@ export const homeVisitDetails = pgTable("home_visit_details", {
 		foreignColumns: [files.id],
 		name: "home_visit_details_attachment_file_id_fkey"
 	}).onDelete("set null"),
+	check("home_visit_details_payment_mode_check", sql`payment_mode = ANY (ARRAY['free_trial'::text, 'pay_before_booking'::text, 'pay_after_completion'::text])`),
 ]);
 
+export const platformHomeVisitFees = pgTable("platform_home_visit_fees", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	specialtyId: uuid("specialty_id"),
+	fee: numeric({ precision: 10, scale: 2 }).notNull(),
+	platformCommissionPercentage: numeric("platform_commission_percentage", { precision: 5, scale: 2 }).default('10.00').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.specialtyId],
+		foreignColumns: [specialties.id],
+		name: "platform_home_visit_fees_specialty_id_fkey"
+	}).onDelete("cascade"),
+	unique("platform_home_visit_fees_specialty_id_key").on(table.specialtyId),
+]);
+
+// One platform-wide row controls home-visit availability and trial/payment rules.
+export const platformHomeVisitSettings = pgTable("platform_home_visit_settings", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	scope: text().default('global').notNull(),
+	homeVisitEnabled: boolean("home_visit_enabled").default(true).notNull(),
+	freeTrialEnabled: boolean("free_trial_enabled").default(true).notNull(),
+	freeTrialVisitLimit: integer("free_trial_visit_limit").default(1).notNull(),
+	freeTrialActiveBookingLimit: integer("free_trial_active_booking_limit").default(1).notNull(),
+	paidPaymentTiming: text("paid_payment_timing").default('pay_after_completion').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	unique("platform_home_visit_settings_scope_key").on(table.scope),
+	check("platform_home_visit_settings_scope_check", sql`scope = 'global'`),
+	check("platform_home_visit_settings_trial_visit_limit_check", sql`free_trial_visit_limit >= 0`),
+	check("platform_home_visit_settings_trial_active_booking_limit_check", sql`free_trial_active_booking_limit >= 1`),
+	check("platform_home_visit_settings_paid_payment_timing_check", sql`paid_payment_timing = ANY (ARRAY['pay_before_booking'::text, 'pay_after_completion'::text])`),
+]);

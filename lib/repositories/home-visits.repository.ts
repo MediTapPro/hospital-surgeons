@@ -5,8 +5,8 @@ import {
   doctors,
   subscriptions,
   doctorAssignmentUsage,
-  assignmentExpiryConfig,
-  homeVisitDetails
+	assignmentExpiryConfig,
+	homeVisitDetails
 } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, sql, lte, gt } from 'drizzle-orm';
 
@@ -60,6 +60,33 @@ export class HomeVisitsRepository {
       .where(eq(doctors.id, doctorId))
       .limit(1);
     return result[0] || null;
+  }
+
+  async lockPatientProfile(patientProfileId: string, tx: any) {
+    await tx.execute(sql`SELECT id FROM patient_profiles WHERE id = ${patientProfileId} FOR UPDATE`);
+  }
+
+  async getFreeTrialCounts(patientProfileId: string, tx?: any) {
+    const client = tx || this.db;
+    const [counts] = await client
+      .select({
+        completed: sql<number>`COUNT(*) FILTER (WHERE ${assignments.status} = 'completed')`,
+        active: sql<number>`COUNT(*) FILTER (WHERE ${assignments.status} IN ('pending', 'accepted'))`,
+      })
+      .from(assignments)
+      .innerJoin(homeVisitDetails, eq(homeVisitDetails.assignmentId, assignments.id))
+      .where(
+        and(
+          eq(assignments.patientProfileId, patientProfileId),
+          eq(assignments.source, 'patient'),
+          eq(homeVisitDetails.isFreeTrial, true)
+        )
+      );
+
+    return {
+      completed: Number(counts?.completed || 0),
+      active: Number(counts?.active || 0),
+    };
   }
 
   async findExpiryConfig(priority: string, tx?: any) {
@@ -141,6 +168,8 @@ export class HomeVisitsRepository {
     source: string;
     expiresAt: string;
     treatmentNotes: string | null;
+    consultationFee?: string | null;
+    specialtyId?: string | null;
   }, tx?: any) {
     const client = tx || this.db;
     const result = await client
@@ -179,6 +208,8 @@ export class HomeVisitsRepository {
     recipientName: string | null;
     recipientPhone: string | null;
     recipientRelationship: string | null;
+		paymentMode: 'free_trial' | 'pay_after_completion';
+		isFreeTrial: boolean;
   }, tx?: any) {
     const client = tx || this.db;
     const result = await client

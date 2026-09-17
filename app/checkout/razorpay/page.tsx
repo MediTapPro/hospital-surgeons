@@ -37,6 +37,9 @@ function RazorpayCheckoutContent() {
   const planId = searchParams.get('planId');
   const userRole = searchParams.get('userRole') || 'doctor';
   const email = searchParams.get('email') || '';
+  const orderType = searchParams.get('orderType');
+  const assignmentId = searchParams.get('assignmentId');
+  const isHomeVisitPayment = orderType === 'consultation' && Boolean(assignmentId);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +81,7 @@ function RazorpayCheckoutContent() {
         key: razorpayKey, // Your Razorpay key ID
         order_id: orderId, // Order ID created on backend
         name: 'Hospital Surgeons',
-        description: 'Subscription Payment',
+        description: isHomeVisitPayment ? 'Home Visit Payment' : 'Subscription Payment',
         // Amount and currency are automatically fetched from the order
         handler: function (response: any) {
           // This function is called when payment is successful
@@ -96,7 +99,9 @@ function RazorpayCheckoutContent() {
           ondismiss: function() {
             // Called when user closes the modal without paying
             // Redirect based on user role from URL params
-            if (userRole === 'hospital') {
+            if (isHomeVisitPayment) {
+              router.push('/patient/bookings');
+            } else if (userRole === 'hospital') {
               router.push(`/hospital/subscriptions${planId ? `?planId=${planId}` : ''}`);
             } else {
               router.push(`/doctor/subscriptions${planId ? `?planId=${planId}` : ''}`);
@@ -147,7 +152,9 @@ function RazorpayCheckoutContent() {
         // Payment verified successfully
         // Redirect to success page with payment details
         // Use planId and userRole from URL params
-        if (userRole === 'hospital') {
+        if (isHomeVisitPayment) {
+          router.push(`/patient/bookings?payment=success&assignmentId=${assignmentId}`);
+        } else if (userRole === 'hospital') {
           router.push(`/hospital/subscriptions/payment/success?payment_id=${response.razorpay_payment_id}&order_id=${response.razorpay_order_id}&planId=${planId || ''}`);
         } else {
           router.push(`/doctor/subscriptions/payment/success?payment_id=${response.razorpay_payment_id}&order_id=${response.razorpay_order_id}&planId=${planId || ''}`);
@@ -238,4 +245,3 @@ export default function RazorpayCheckoutPage() {
     </Suspense>
   );
 }
-

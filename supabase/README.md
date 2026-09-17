@@ -65,7 +65,7 @@ fi
 Run:
 
 ```bash
-npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_booking
+npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_payouts
 ```
 
 This compares the migration state with the **remote Supabase database** and generates a migration file.
@@ -87,7 +87,7 @@ for this workflow.
 For the remote database, use:
 
 ```bash
-npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_booking
+npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_payouts
 ```
 
 ---
@@ -105,7 +105,7 @@ npx supabase link --project-ref bbohghnflhlascogqqdr
 ```
 
 ```bash
-npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_booking
+npx supabase db diff --db-url "postgresql://postgres.bbohghnflhlascogqqdr:medi-link@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true" -f add_home_visit_payouts
 ```
 
 The generated migration will be placed under:

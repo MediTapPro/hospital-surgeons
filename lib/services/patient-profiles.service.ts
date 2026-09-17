@@ -1,5 +1,6 @@
 import { PatientProfilesRepository } from '@/lib/repositories/patient-profiles.repository';
 import { getDb } from '@/lib/db';
+import { platformHomeVisitFees } from '@/src/db/drizzle/migrations/schema';
 
 export class PatientProfilesService {
   private profilesRepo = new PatientProfilesRepository();
@@ -131,6 +132,33 @@ export class PatientProfilesService {
   // --- Home Visit Bookings ---
   async getHomeVisitBookings(userId: string) {
     const profile = await this.getVerifiedProfile(userId);
-    return await this.profilesRepo.getPatientHomeVisitBookings(profile.id);
+    const bookings = await this.profilesRepo.getPatientHomeVisitBookings(profile.id);
+    const db = getDb();
+    const platformFees = await db.select().from(platformHomeVisitFees);
+
+    return bookings.map((booking: any) => {
+      const feeAmount = booking.consultationFee ? Number(booking.consultationFee) : 0;
+      let platformCommissionPercentage = 0;
+      
+      const specFee = platformFees.find((f: any) => f.specialtyId === booking.specialtyId);
+      if (specFee) {
+        platformCommissionPercentage = parseFloat(specFee.platformCommissionPercentage);
+      } else {
+        const defaultFee = platformFees.find((f: any) => f.specialtyId === null);
+        if (defaultFee) {
+          platformCommissionPercentage = parseFloat(defaultFee.platformCommissionPercentage);
+        }
+      }
+      
+      const platformCommission = (feeAmount * platformCommissionPercentage) / 100;
+      const doctorPayout = feeAmount - platformCommission;
+
+      return {
+        ...booking,
+        platformCommissionPercentage,
+        platformCommission,
+        doctorPayout,
+      };
+    });
   }
 }

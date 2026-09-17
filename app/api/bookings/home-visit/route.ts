@@ -116,7 +116,11 @@ async function postHandler(req: AuthenticatedRequest) {
 
     return NextResponse.json({
       success: true,
-      data: newAssignment,
+      data: {
+        ...newAssignment,
+        paymentMode: result.paymentMode,
+        isFreeTrial: result.isFreeTrial,
+      },
       message: 'Home visit booking created successfully',
     }, { status: 201 });
 
@@ -133,4 +137,41 @@ async function postHandler(req: AuthenticatedRequest) {
   }
 }
 
+async function getHandler(req: AuthenticatedRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const doctorId = searchParams.get('doctorId');
+
+    if (!doctorId) {
+      return NextResponse.json(
+        { success: false, message: 'doctorId parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    const user = req.user;
+    if (!user?.userId) {
+      return NextResponse.json(
+        { success: false, message: 'User context not found' },
+        { status: 401 }
+      );
+    }
+
+    const homeVisitsService = new HomeVisitsService();
+    const quoteResult = await homeVisitsService.getBookingQuote(user.userId, doctorId);
+    return NextResponse.json(quoteResult, { status: quoteResult.success ? 200 : 400 });
+  } catch (error) {
+    console.error('Error in GET /api/bookings/home-visit:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Failed to retrieve home visit fee',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export const GET = withAuth(getHandler, ['patient', 'admin']);
 export const POST = withAuth(postHandler, ['patient', 'admin']);

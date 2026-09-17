@@ -22,3 +22,16 @@ export const PATIENT_SEARCH_QUERY_KEYS = {
 
 export const PATIENT_SEARCH_LOCATION_DEFAULT = 'default';
 export const PATIENT_SEARCH_LOCATION_GPS = 'gps';
+
+export const HOME_VISIT_SETTINGS_SCOPE = 'global';
+
+export const HOME_VISIT_PAYMENT_TIMINGS = [
+  {
+    value: 'pay_after_completion',
+    label: 'Pay after completion',
+    description: 'The patient is asked to pay after the doctor completes the visit.',
+  },
+] as const;
+
+export type HomeVisitPaymentTiming =
+  (typeof HOME_VISIT_PAYMENT_TIMINGS)[number]['value'];

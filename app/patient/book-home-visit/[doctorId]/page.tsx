@@ -120,6 +120,33 @@ export default function BookHomeVisitPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successBooking, setSuccessBooking] = useState<any | null>(null);
 
+  // Fee Details
+  const [fee, setFee] = useState<number | null>(null);
+  const [loadingFee, setLoadingFee] = useState<boolean>(true);
+
+  // Load Home Visit Fee Details
+  useEffect(() => {
+    const fetchFee = async () => {
+      try {
+        setLoadingFee(true);
+        const response = await apiClient.get(`/api/bookings/home-visit`, {
+          params: { doctorId },
+        });
+        if (response.data.success && response.data.data) {
+          setFee(response.data.data.fee);
+        }
+      } catch (err) {
+        console.error('Error fetching home visit fee:', err);
+      } finally {
+        setLoadingFee(false);
+      }
+    };
+
+    if (doctorId) {
+      fetchFee();
+    }
+  }, [doctorId]);
+
   // Load Doctor Details
   useEffect(() => {
     const fetchDoctor = async () => {
@@ -414,7 +441,9 @@ export default function BookHomeVisitPage() {
           <div className="space-y-2">
             <h2 className="text-2xl font-bold text-slate-900">Booking Requested!</h2>
             <p className="text-sm text-slate-500">
-              Your request for a doctor home visit has been sent successfully and is awaiting doctor confirmation.
+              {successBooking.isFreeTrial
+                ? 'Your complimentary home visit request has been sent and is awaiting doctor confirmation.'
+                : 'Your request has been sent and is awaiting doctor confirmation. Payment will be requested only after the visit is completed.'}
             </p>
           </div>
 
@@ -443,6 +472,10 @@ export default function BookHomeVisitPage() {
               <span className="font-bold text-slate-800">
                 {formatTimeDisplay(selectedStartTime)} - {formatTimeDisplay(selectedEndTime)}
               </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Consultation Fee:</span>
+              <span className="font-bold text-slate-800">{successBooking.isFreeTrial ? 'Free trial' : `₹${fee != null ? fee.toFixed(2) : '--'}`}</span>
             </div>
             <div className="flex justify-between">
               <span>Booking ID:</span>
@@ -868,6 +901,20 @@ export default function BookHomeVisitPage() {
                     <span>License No:</span>
                     <span className="font-bold text-white">{doctor.medicalLicenseNumber}</span>
                   </div>
+                  <div className="flex justify-between text-blue-100 items-center">
+                    <span>{fee === 0 ? 'Trial benefit:' : 'Consultation Fee:'}</span>
+                    <span className="font-bold text-white text-sm bg-white/10 px-2.5 py-1 rounded-lg flex items-center gap-1">
+                      {loadingFee ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : fee === 0 ? (
+                        'First visit free'
+                      ) : fee !== null ? (
+                        `₹${fee.toFixed(2)}`
+                      ) : (
+                        'Not configured'
+                      )}
+                    </span>
+                  </div>
                 </div>
 
                 {selectedStartTime && selectedEndTime && (
@@ -901,7 +948,7 @@ export default function BookHomeVisitPage() {
                       Processing...
                     </>
                   ) : (
-                    'Confirm Home Visit Request'
+                    fee === 0 ? 'Book Free Home Visit' : 'Request Home Visit'
                   )}
                 </Button>
               </section>

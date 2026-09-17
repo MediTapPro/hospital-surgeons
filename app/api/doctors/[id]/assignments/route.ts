@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { assignments, doctors, patients, hospitals, doctorAvailability, enumPriority, patientProfiles, homeVisitDetails, users } from '@/src/db/drizzle/migrations/schema';
+import { assignments, doctors, patients, hospitals, doctorAvailability, enumPriority, patientProfiles, homeVisitDetails, users, platformHomeVisitFees } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, or, sql, desc, asc, gte, lte } from 'drizzle-orm';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 
@@ -182,6 +182,9 @@ async function getHandler(
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
+    // Get platform fee configurations
+    const platformFees = await db.select().from(platformHomeVisitFees);
+
     // Get assignments with related data
     const assignmentsList = await db
       .select({
@@ -200,6 +203,7 @@ async function getHandler(
         treatmentNotes: assignments.treatmentNotes,
         consultationFee: assignments.consultationFee,
         availabilitySlotId: assignments.availabilitySlotId,
+        specialtyId: assignments.specialtyId,
         // Patient info
         patientName: sql<string>`(SELECT full_name FROM patients WHERE id = ${assignments.patientId})`,
         patientCondition: sql<string>`(SELECT medical_condition FROM patients WHERE id = ${assignments.patientId})`,
@@ -236,6 +240,22 @@ async function getHandler(
 
     // Format response
     let formattedAssignments = assignmentsList.map((assignment) => {
+      const feeAmount = assignment.consultationFee ? Number(assignment.consultationFee) : 0;
+      let platformCommissionPercentage = 0;
+      if (assignment.source === 'patient') {
+        const specFee = platformFees.find(f => f.specialtyId === assignment.specialtyId);
+        if (specFee) {
+          platformCommissionPercentage = parseFloat(specFee.platformCommissionPercentage);
+        } else {
+          const defaultFee = platformFees.find(f => f.specialtyId === null);
+          if (defaultFee) {
+            platformCommissionPercentage = parseFloat(defaultFee.platformCommissionPercentage);
+          }
+        }
+      }
+      const platformCommission = (feeAmount * platformCommissionPercentage) / 100;
+      const doctorPayout = feeAmount - platformCommission;
+
       const date = assignment.slotDate || (assignment.requestedAt ? new Date(assignment.requestedAt).toISOString().split('T')[0] : null);
       const time = assignment.slotTime || 'TBD';
       const endTime = assignment.slotEndTime || null;
@@ -314,7 +334,10 @@ async function getHandler(
         parentSlotId: assignment.parentSlotId || null,
         availabilitySlotId: assignment.availabilitySlotId || null,
         expiresAt: assignment.expiresAt,
-        fee: assignment.consultationFee ? Number(assignment.consultationFee) : 0,
+        fee: feeAmount,
+        platformCommissionPercentage,
+        platformCommission,
+        doctorPayout,
         declineReason: assignment.status === 'declined' ? assignment.cancellationReason : null,
         cancellationReason: assignment.status === 'cancelled' ? assignment.cancellationReason : null,
         treatmentNotes: assignment.treatmentNotes,

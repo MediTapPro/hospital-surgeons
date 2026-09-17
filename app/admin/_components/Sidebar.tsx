@@ -20,6 +20,8 @@ import {
   LogOut,
   Calendar,
   CalendarX,
+  Coins,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -87,6 +89,8 @@ export function Sidebar() {
     { id: "assignments", label: "Assignments", icon: ClipboardList, href: "/admin/assignments" },
     { id: "affiliations", label: "Affiliations", icon: Building2, href: "/admin/affiliations" },
     { id: "subscriptions", label: "Subscriptions", icon: Wallet, href: "/admin/subscriptions" },
+    { id: "home-visit-fees", label: "Home Visit Fees", icon: Coins, href: "/admin/home-visit-fees" },
+    { id: "home-visit-settings", label: "Home Visit Settings", icon: SlidersHorizontal, href: "/admin/home-visit-settings" },
     { id: "analytics", label: "Analytics", icon: BarChart3, href: "/admin/analytics" },
     { id: "schedule-updates", label: "Schedule Updates", icon: Calendar, href: "/admin/schedule-updates" },
     { id: "vacation-updates", label: "Vacation Updates", icon: CalendarX, href: "/admin/vacation-updates" },
@@ -193,7 +197,6 @@ export function Sidebar() {
     </aside>
   );
 }
-
 
 
 

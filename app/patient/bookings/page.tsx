@@ -52,6 +52,11 @@ interface Booking {
   slotDate: string | null;
   slotStartTime: string | null;
   slotEndTime: string | null;
+  paymentMode: 'free_trial' | 'pay_after_completion';
+  isFreeTrial: boolean;
+  platformCommissionPercentage?: number;
+  platformCommission?: number;
+  doctorPayout?: number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -102,6 +107,7 @@ export default function PatientBookingsPage() {
   const [profileName, setProfileName] = useState('');
   const [profileEmail, setProfileEmail] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'addresses' | 'family' | 'profile'>('bookings');
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated() || getUserRole() !== 'patient') {
@@ -134,6 +140,29 @@ export default function PatientBookingsPage() {
     localStorage.removeItem('rememberMe');
     toast.success('Logged out successfully');
     router.push('/login?role=patient');
+  };
+
+  const handlePayment = async (bookingId: string) => {
+    try {
+      setPayingBookingId(bookingId);
+      const response = await apiClient.post(`/api/bookings/home-visit/${bookingId}/payment-order`);
+      const checkoutData = response.data?.data?.session?.checkoutData;
+      if (!response.data.success || !checkoutData?.orderId) {
+        throw new Error(response.data.message || 'Unable to start payment.');
+      }
+
+      const query = new URLSearchParams({
+        order_id: checkoutData.orderId,
+        orderType: 'consultation',
+        assignmentId: bookingId,
+      });
+      router.push(`/checkout/razorpay?${query.toString()}`);
+    } catch (error: any) {
+      console.error('Unable to start home visit payment:', error);
+      toast.error(error.response?.data?.message || error.message || 'Unable to start payment.');
+    } finally {
+      setPayingBookingId(null);
+    }
   };
 
   if (loading) {
@@ -456,7 +485,40 @@ export default function PatientBookingsPage() {
                         </span>
                       )}
                       {booking.consultationFee && (
-                        <span className="font-bold text-slate-800">₹{booking.consultationFee}</span>
+                        <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-lg space-y-1.5 w-full sm:w-56 text-[11px] text-left sm:text-right">
+                          <div className="flex justify-between font-bold text-slate-800 border-b border-slate-200 pb-1.5">
+                            <span>Total Fee:</span>
+                            <span>₹{parseFloat(booking.consultationFee).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>Doctor Share:</span>
+                            <span>₹{Number(booking.doctorPayout || 0).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-500">
+                            <span>Platform Fee:</span>
+                            <span>₹{Number(booking.platformCommission || 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
+                      {booking.isFreeTrial && (
+                        <span className="mt-2 inline-flex rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
+                          Complimentary trial visit
+                        </span>
+                      )}
+                      {booking.status === 'completed' && booking.paymentMode === 'pay_after_completion' && !booking.paidAt && (
+                        <button
+                          type="button"
+                          onClick={() => handlePayment(booking.id)}
+                          disabled={payingBookingId === booking.id}
+                          className="mt-2 w-full rounded-lg bg-teal-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                        >
+                          {payingBookingId === booking.id ? 'Opening payment…' : 'Pay for completed visit'}
+                        </button>
+                      )}
+                      {booking.status === 'completed' && booking.paymentMode === 'pay_after_completion' && booking.paidAt && (
+                        <span className="mt-2 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                          Payment received
+                        </span>
                       )}
                     </div>
                   </div>

@@ -227,6 +227,7 @@ export class PatientProfilesRepository {
         cancelledAt: assignments.cancelledAt,
         completedAt: assignments.completedAt,
         paidAt: assignments.paidAt,
+        specialtyId: assignments.specialtyId,
         // Doctor info
         doctorId: doctors.id,
         doctorFirstName: doctors.firstName,
@@ -238,6 +239,8 @@ export class PatientProfilesRepository {
         symptoms: homeVisitDetails.symptoms,
         clinicalNotes: homeVisitDetails.clinicalNotes,
         prescription: homeVisitDetails.prescription,
+        paymentMode: homeVisitDetails.paymentMode,
+        isFreeTrial: homeVisitDetails.isFreeTrial,
         // Address info (snapshot taken at booking time)
         addressLabel: homeVisitDetails.addressLabel,
         addressText: homeVisitDetails.addressText,

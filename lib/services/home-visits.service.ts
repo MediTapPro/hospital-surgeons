@@ -4,12 +4,16 @@ import { CreateHomeVisitDto } from '@/lib/validations/home-visit.dto';
 import { DoctorsRepository } from '@/lib/repositories/doctors.repository';
 import { PatientProfilesRepository } from '@/lib/repositories/patient-profiles.repository';
 import { HomeVisitsRepository } from '@/lib/repositories/home-visits.repository';
+import { PlatformFeesRepository } from '@/lib/repositories/platform-fees.repository';
+import { HomeVisitSettingsService } from '@/lib/services/home-visit-settings.service';
 
 export class HomeVisitsService {
   private db = getDb();
   private doctorsRepository = new DoctorsRepository();
   private patientProfilesRepo = new PatientProfilesRepository();
   private homeVisitsRepo = new HomeVisitsRepository();
+  private platformFeesRepo = new PlatformFeesRepository();
+  private homeVisitSettingsService = new HomeVisitSettingsService();
 
   private async checkAssignmentLimit(doctorId: string, db: any) {
     const doctor = await this.homeVisitsRepo.findDoctorUser(doctorId);
@@ -78,6 +82,22 @@ export class HomeVisitsService {
         ? this.patientProfilesRepo.getFamilyMemberById(patientFamilyMemberId)
         : Promise.resolve(null),
     ]);
+
+    if (!address || address.patientProfileId !== patientProfileId) {
+      return {
+        success: false,
+        code: 'ADDRESS_NOT_FOUND',
+        message: 'Please select one of your saved addresses.',
+      };
+    }
+
+    if (patientFamilyMemberId && (!familyMember || familyMember.patientProfileId !== patientProfileId)) {
+      return {
+        success: false,
+        code: 'FAMILY_MEMBER_NOT_FOUND',
+        message: 'Please select one of your saved family members.',
+      };
+    }
 
     // 2. Check doctor limit
     try {
@@ -219,66 +239,231 @@ export class HomeVisitsService {
       }
     }
 
-    // 5. Ensure Priority Exists
-    await this.homeVisitsRepo.ensurePriorityExists(priority);
+    // 5. Resolve home visit fee & specialtyId
+    let resolvedFee: string | null = null;
+    let resolvedSpecialtyId: string | null = null;
+
+    const feeRes = await this.resolveHomeVisitFeeForDoctor(doctorId);
+    if (feeRes.success && feeRes.data) {
+      resolvedFee = feeRes.data.fee.toFixed(2);
+      resolvedSpecialtyId = feeRes.data.specialtyId;
+    }
 
     let finalAvailabilitySlotId: string;
     let newAssignment: any;
+    let bookingMode: 'free_trial' | 'pay_after_completion' = 'pay_after_completion';
+    let isFreeTrial = false;
 
-    // 6. DB Transaction (Multi-write wrapped in transaction boundary)
-    await this.db.transaction(async (tx) => {
-      if (useNewSlotFlow) {
-        const subSlot = await this.homeVisitsRepo.createSubSlot({
+    try {
+      await this.db.transaction(async (tx) => {
+        const settingsResult = await this.homeVisitSettingsService.getSettings(tx);
+        if (!settingsResult.success || !settingsResult.data) {
+          throw new Error('HOME_VISIT_SETTINGS_UNAVAILABLE');
+        }
+
+        const settings = settingsResult.data;
+        if (!settings.homeVisitEnabled) {
+          throw new Error('HOME_VISITS_DISABLED');
+        }
+
+        await this.homeVisitsRepo.lockPatientProfile(patientProfileId, tx);
+        const trialCounts = await this.homeVisitsRepo.getFreeTrialCounts(patientProfileId, tx);
+        isFreeTrial = settings.freeTrialEnabled
+          && trialCounts.completed < settings.freeTrialVisitLimit
+          && trialCounts.active < settings.freeTrialActiveBookingLimit;
+        bookingMode = isFreeTrial ? 'free_trial' : 'pay_after_completion';
+
+        if (!isFreeTrial && (!resolvedFee || Number(resolvedFee) <= 0)) {
+          throw new Error('HOME_VISIT_FEE_NOT_CONFIGURED');
+        }
+
+        await this.homeVisitsRepo.ensurePriorityExists(priority, tx);
+
+        if (useNewSlotFlow) {
+          const subSlot = await this.homeVisitsRepo.createSubSlot({
+            doctorId,
+            slotDate: slotDate!,
+            startTime: startTime!,
+            endTime: endTime!,
+            parentSlotId: parentSlotId!,
+            status: 'booked',
+            slotType: 'home_visit',
+            isManual: false,
+            notes: 'Sub-slot created for patient home visit',
+          }, tx);
+
+          finalAvailabilitySlotId = subSlot.id;
+        } else {
+          await this.homeVisitsRepo.updateSlotStatus(availabilitySlotId!, 'booked', tx);
+          finalAvailabilitySlotId = availabilitySlotId!;
+        }
+
+        newAssignment = await this.homeVisitsRepo.createAssignment({
           doctorId,
-          slotDate: slotDate!,
-          startTime: startTime!,
-          endTime: endTime!,
-          parentSlotId: parentSlotId!,
-          status: 'booked',
-          slotType: 'home_visit',
-          isManual: false,
-          notes: 'Sub-slot created for patient home visit',
+          patientProfileId,
+          availabilitySlotId: finalAvailabilitySlotId,
+          priority,
+          status: 'pending',
+          source: 'patient',
+          expiresAt: expiresAt.toISOString(),
+          treatmentNotes: treatmentNotes || null,
+          consultationFee: isFreeTrial ? '0.00' : resolvedFee,
+          specialtyId: resolvedSpecialtyId,
         }, tx);
 
-        finalAvailabilitySlotId = subSlot.id;
-      } else {
-        await this.homeVisitsRepo.updateSlotStatus(availabilitySlotId!, 'booked', tx);
-        finalAvailabilitySlotId = availabilitySlotId!;
+        await this.homeVisitsRepo.createHomeVisitDetails({
+          assignmentId: newAssignment.id,
+          patientAddressId: patientAddressId || null,
+          patientFamilyMemberId: patientFamilyMemberId || null,
+          symptoms: symptoms || null,
+          addressLabel: address.label,
+          addressText: address.addressText,
+          addressLatitude: address.latitude != null ? String(address.latitude) : null,
+          addressLongitude: address.longitude != null ? String(address.longitude) : null,
+          recipientName: familyMember?.fullName ?? null,
+          recipientPhone: familyMember?.phone ?? null,
+          recipientRelationship: familyMember?.relationship ?? null,
+          paymentMode: bookingMode,
+          isFreeTrial,
+        }, tx);
+
+        await this.incrementAssignmentUsage(doctorId, tx);
+      });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'HOME_VISIT_BOOKING_FAILED';
+      const messages: Record<string, string> = {
+        HOME_VISIT_SETTINGS_UNAVAILABLE: 'Home visit settings are currently unavailable. Please try again shortly.',
+        HOME_VISITS_DISABLED: 'Home visit bookings are currently unavailable.',
+        HOME_VISIT_FEE_NOT_CONFIGURED: 'This doctor does not have a home visit fee configured yet.',
+      };
+
+      if (messages[code]) {
+        return { success: false, code, message: messages[code] };
       }
 
-      newAssignment = await this.homeVisitsRepo.createAssignment({
-        doctorId,
-        patientProfileId,
-        availabilitySlotId: finalAvailabilitySlotId,
-        priority,
-        status: 'pending',
-        source: 'patient',
-        expiresAt: expiresAt.toISOString(),
-        treatmentNotes: treatmentNotes || null,
-      }, tx);
-
-      await this.homeVisitsRepo.createHomeVisitDetails({
-        assignmentId: newAssignment.id,
-        patientAddressId: patientAddressId || null,
-        patientFamilyMemberId: patientFamilyMemberId || null,
-        symptoms: symptoms || null,
-        addressLabel: address?.label ?? null,
-        addressText: address?.addressText ?? null,
-        addressLatitude: address?.latitude != null ? String(address.latitude) : null,
-        addressLongitude: address?.longitude != null ? String(address.longitude) : null,
-        recipientName: familyMember?.fullName ?? null,
-        recipientPhone: familyMember?.phone ?? null,
-        recipientRelationship: familyMember?.relationship ?? null,
-      }, tx);
-
-      await this.incrementAssignmentUsage(doctorId, tx);
-    });
+      throw error;
+    }
 
     return {
       success: true,
       data: newAssignment,
       patientName,
       expiresAt,
+		paymentMode: bookingMode,
+		isFreeTrial,
+    };
+  }
+
+  async resolveHomeVisitFeeForDoctor(doctorId: string) {
+    try {
+      const docSpecs = await this.doctorsRepository.getDoctorSpecialties(doctorId);
+      
+      let feeConfig = null;
+      let resolvedSpecialtyId: string | null = null;
+      
+      const primarySpec = docSpecs.length > 0 ? docSpecs[0] : null;
+      
+      if (primarySpec && primarySpec.specialty?.id) {
+        feeConfig = await this.platformFeesRepo.findBySpecialtyId(primarySpec.specialty.id);
+        if (feeConfig) {
+          resolvedSpecialtyId = primarySpec.specialty.id;
+        }
+      }
+      
+      // Fallback to default platform fee if no fee config found for primary specialty
+      if (!feeConfig) {
+        feeConfig = await this.platformFeesRepo.findBySpecialtyId(null);
+        if (primarySpec && primarySpec.specialty?.id) {
+          resolvedSpecialtyId = primarySpec.specialty.id;
+        }
+      }
+
+      if (!feeConfig) {
+        return {
+          success: false,
+          message: 'No fee configuration found',
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          fee: parseFloat(feeConfig.fee),
+          platformCommissionPercentage: parseFloat(feeConfig.platformCommissionPercentage),
+          specialtyId: resolvedSpecialtyId,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Failed to resolve fee',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async getBookingQuote(userId: string, doctorId: string) {
+    const patientProfile = await this.patientProfilesRepo.findProfileByUserId(userId);
+    if (!patientProfile) {
+      return {
+        success: false,
+        code: 'PATIENT_PROFILE_NOT_FOUND',
+        message: 'Patient profile not found. Please complete profile registration.',
+      };
+    }
+
+    const settingsResult = await this.homeVisitSettingsService.getSettings();
+    if (!settingsResult.success || !settingsResult.data) {
+      return {
+        success: false,
+        code: 'HOME_VISIT_SETTINGS_UNAVAILABLE',
+        message: 'Home visit settings are currently unavailable. Please try again shortly.',
+      };
+    }
+
+    const settings = settingsResult.data;
+    if (!settings.homeVisitEnabled) {
+      return {
+        success: false,
+        code: 'HOME_VISITS_DISABLED',
+        message: 'Home visit bookings are currently unavailable.',
+      };
+    }
+
+    const trialCounts = await this.homeVisitsRepo.getFreeTrialCounts(patientProfile.id);
+    const isFreeTrial = settings.freeTrialEnabled
+      && trialCounts.completed < settings.freeTrialVisitLimit
+      && trialCounts.active < settings.freeTrialActiveBookingLimit;
+
+    if (isFreeTrial) {
+      return {
+        success: true,
+        data: {
+          fee: 0,
+          isFreeTrial: true,
+          paymentMode: 'free_trial' as const,
+          paymentTiming: settings.paidPaymentTiming,
+        },
+      };
+    }
+
+    const feeResult = await this.resolveHomeVisitFeeForDoctor(doctorId);
+    if (!feeResult.success || !feeResult.data || feeResult.data.fee <= 0) {
+      return {
+        success: false,
+        code: 'HOME_VISIT_FEE_NOT_CONFIGURED',
+        message: 'This doctor does not have a home visit fee configured yet.',
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        fee: feeResult.data.fee,
+        isFreeTrial: false,
+        paymentMode: 'pay_after_completion' as const,
+        paymentTiming: settings.paidPaymentTiming,
+      },
     };
   }
 }
