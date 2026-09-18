@@ -88,4 +88,28 @@ export class AssignmentPaymentsRepository {
     ]);
     return { totalEarnings: Number(completed[0]?.total ?? 0), pendingEarnings: Number(pending[0]?.total ?? 0) };
   }
+
+  async findSettlementById(id: string, tx?: any) {
+    const client = tx || this.db;
+    const [payment] = await client
+      .select({
+        id: assignmentPayments.id,
+        paymentSource: assignmentPayments.paymentSource,
+        patientPaymentStatus: assignmentPayments.patientPaymentStatus,
+        paymentStatus: assignmentPayments.paymentStatus,
+      })
+      .from(assignmentPayments)
+      .where(eq(assignmentPayments.id, id))
+      .limit(1);
+    return payment || null;
+  }
+
+  async markSettlementPaid(id: string, tx?: any) {
+    const client = tx || this.db;
+    return client
+      .update(assignmentPayments)
+      .set({ paymentStatus: 'completed', paidToDoctorAt: new Date().toISOString() })
+      .where(and(eq(assignmentPayments.id, id), eq(assignmentPayments.paymentStatus, 'pending')))
+      .returning({ id: assignmentPayments.id, paymentStatus: assignmentPayments.paymentStatus, paidToDoctorAt: assignmentPayments.paidToDoctorAt });
+  }
 }

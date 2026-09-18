@@ -6,9 +6,7 @@ const apiClient = axios.create({
   baseURL: '',
 });
 
-let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
-const pendingRequests: Array<(token: string | null) => void> = [];
 
 const getAccessToken = () => {
   if (typeof window === 'undefined') return null;
@@ -44,7 +42,7 @@ async function refreshAccessToken(): Promise<string | null> {
   refreshPromise = (async () => {
     try {
       const response = await axios.post('/api/users/refresh', {
-        token: refreshToken,
+        refreshToken,
       });
       if (response.data?.success && response.data?.data?.accessToken) {
         setAccessToken(response.data.data.accessToken);
@@ -83,29 +81,13 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      if (!isRefreshing) {
-        isRefreshing = true;
-        const newToken = await refreshAccessToken();
-        isRefreshing = false;
-        pendingRequests.forEach((cb) => cb(newToken));
-        pendingRequests.length = 0;
+      const newToken = await refreshAccessToken();
+      if (!newToken) return Promise.reject(error);
 
-        if (!newToken) {
-          return Promise.reject(error);
-        }
-      }
-
-      return new Promise((resolve, reject) => {
-        pendingRequests.push((token) => {
-          if (!token) {
-            reject(error);
-            return;
-          }
-          originalRequest._retry = true;
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(apiClient(originalRequest));
-        });
-      });
+      originalRequest._retry = true;
+      originalRequest.headers = originalRequest.headers || {};
+      originalRequest.headers.Authorization = `Bearer ${newToken}`;
+      return apiClient(originalRequest);
     }
 
     return Promise.reject(error);
@@ -114,4 +96,3 @@ apiClient.interceptors.response.use(
 
 export { apiClient };
 export default apiClient;
-

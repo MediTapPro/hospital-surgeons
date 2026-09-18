@@ -1,4 +1,5 @@
 import { AssignmentPaymentsRepository } from '@/lib/repositories/assignment-payments.repository';
+import { getDb } from '@/lib/db';
 import {
   ASSIGNMENT_PAYMENT_SOURCES,
   ASSIGNMENT_SETTLEMENT_STATUSES,
@@ -47,5 +48,25 @@ export class AssignmentPaymentsService {
   async listForDoctor(doctorId: string, input: { page?: string | null; limit?: string | null; source?: string | null; status?: string | null }) {
     const [result, earnings] = await Promise.all([this.list({ ...input, doctorId }), this.repository.doctorEarnings(doctorId)]);
     return { ...result, ...earnings };
+  }
+
+  async markSettlementPaid(paymentId: string) {
+    const db = getDb();
+    return await db.transaction(async (tx) => {
+      const repository = new AssignmentPaymentsRepository(tx);
+      const payment = await repository.findSettlementById(paymentId, tx);
+
+      if (!payment) return { success: false as const, code: 'PAYMENT_NOT_FOUND' };
+      if (payment.paymentSource !== 'home_visit') return { success: false as const, code: 'UNSUPPORTED_PAYMENT_SOURCE' };
+      if (payment.paymentStatus !== 'pending') return { success: false as const, code: 'SETTLEMENT_NOT_PENDING' };
+      if (payment.patientPaymentStatus !== 'paid') {
+        return { success: false as const, code: 'PATIENT_PAYMENT_NOT_PAID' };
+      }
+
+      const [updatedPayment] = await repository.markSettlementPaid(paymentId, tx);
+      if (!updatedPayment) return { success: false as const, code: 'SETTLEMENT_NOT_PENDING' };
+
+      return { success: true as const, data: updatedPayment };
+    });
   }
 }

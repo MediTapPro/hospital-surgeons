@@ -155,7 +155,6 @@ export class UsersService {
 
   async refreshToken(token:string) {
     try {
-      console.log(token,"token")
       // Verify refresh token
 
       const payload = verifyToken(
@@ -959,4 +958,3 @@ export class UsersService {
     }
   }
 }
-

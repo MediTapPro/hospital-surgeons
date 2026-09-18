@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CreditCard, Loader2 } from 'lucide-react';
+import { CheckCircle2, CreditCard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api/httpClient';
 import { PageHeader } from '../_components/PageHeader';
 import { Button } from '../_components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../_components/ui/select';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../_components/ui/alert-dialog';
 
 type Payment = {
   id: string;
@@ -14,6 +15,7 @@ type Payment = {
   patientPaymentStatus: string;
   paymentStatus: string;
   consultationFee: number;
+  doctorPayout: number;
   doctor: string;
   patient: string;
 };
@@ -61,7 +63,7 @@ function PaymentFilters({ source, status, onSourceChange, onStatusChange }: {
   );
 }
 
-function PaymentsTable({ payments, loading }: { payments: Payment[]; loading: boolean }) {
+function PaymentsTable({ payments, loading, onSettle }: { payments: Payment[]; loading: boolean; onSettle: (payment: Payment) => void }) {
   if (loading) {
     return <div className="flex min-h-64 items-center justify-center"><Loader2 className="size-7 animate-spin text-teal-600" aria-label="Loading payments" /></div>;
   }
@@ -71,7 +73,7 @@ function PaymentsTable({ payments, loading }: { payments: Payment[]; loading: bo
   return (
     <table className="min-w-full text-sm">
       <thead className="bg-slate-50 text-left text-slate-600">
-        <tr><th className="px-4 py-3">Source</th><th className="px-4 py-3">Doctor</th><th className="px-4 py-3">Patient</th><th className="px-4 py-3">Fee</th><th className="px-4 py-3">Patient payment</th><th className="px-4 py-3">Settlement</th></tr>
+        <tr><th className="px-4 py-3">Source</th><th className="px-4 py-3">Doctor</th><th className="px-4 py-3">Patient</th><th className="px-4 py-3">Fee</th><th className="px-4 py-3">Patient payment</th><th className="px-4 py-3">Settlement</th><th className="px-4 py-3">Action</th></tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
         {payments.map((payment) => (
@@ -81,6 +83,13 @@ function PaymentsTable({ payments, loading }: { payments: Payment[]; loading: bo
             <td className="px-4 py-3">₹{payment.consultationFee.toFixed(2)}</td>
             <td className="px-4 py-3">{payment.paymentSource === 'home_visit' ? formatStatus(payment.patientPaymentStatus) : '—'}</td>
             <td className="px-4 py-3">{formatStatus(payment.paymentStatus)}</td>
+            <td className="px-4 py-3">
+              {payment.paymentSource === 'home_visit' && payment.paymentStatus === 'pending' && payment.patientPaymentStatus === 'paid' ? (
+                <Button size="sm" className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700" onClick={() => onSettle(payment)}>
+                  <CheckCircle2 className="size-3.5" /> Pay ₹{payment.doctorPayout.toFixed(2)}
+                </Button>
+              ) : '—'}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -95,6 +104,8 @@ export default function AdminPaymentsPage() {
   const [source, setSource] = useState(PAYMENT_SOURCE_ALL);
   const [status, setStatus] = useState(SETTLEMENT_STATUS_ALL);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, total: 0, totalPages: 0 });
+  const [paymentToSettle, setPaymentToSettle] = useState<Payment | null>(null);
+  const [settling, setSettling] = useState(false);
 
   useEffect(() => {
     async function loadPayments() {
@@ -115,13 +126,29 @@ export default function AdminPaymentsPage() {
 
   const resetPage = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
 
+  async function settlePayment() {
+    if (!paymentToSettle) return;
+    try {
+      setSettling(true);
+      const response = await apiClient.patch(`/api/admin/payments/${paymentToSettle.id}/settle`);
+      if (!response.data.success) throw new Error(response.data.message || 'Unable to mark the doctor settlement as paid.');
+      toast.success('Doctor settlement marked as paid.');
+      setPaymentToSettle(null);
+      setPayments((current) => current.map((payment) => payment.id === paymentToSettle.id ? { ...payment, paymentStatus: 'completed' } : payment));
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to mark the doctor settlement as paid.');
+    } finally {
+      setSettling(false);
+    }
+  }
+
   return (
     <main className="p-4 sm:p-6 lg:p-8">
       <PageHeader title="Payments" description="Hospital settlements and patient home-visit collections." />
       <div className="mt-6 space-y-4">
         <PaymentFilters source={source} status={status} onSourceChange={resetPage(setSource)} onStatusChange={resetPage(setStatus)} />
         <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <PaymentsTable payments={payments} loading={loading} />
+          <PaymentsTable payments={payments} loading={loading} onSettle={setPaymentToSettle} />
           {pagination.totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-slate-100 p-4">
               <span className="text-sm text-slate-500">Page {pagination.page} of {pagination.totalPages} · {pagination.total} records</span>
@@ -130,6 +157,26 @@ export default function AdminPaymentsPage() {
           )}
         </section>
       </div>
+      <AlertDialog open={Boolean(paymentToSettle)} onOpenChange={(open) => !open && setPaymentToSettle(null)}>
+        <AlertDialogContent className="max-w-md border-slate-200 bg-white p-6 shadow-2xl">
+          <AlertDialogHeader>
+            <p className="text-sm font-semibold text-teal-700">Home-visit payout</p>
+            <AlertDialogTitle>Confirm doctor payout</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirm this only after transferring the payout to the doctor.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <dl className="space-y-3 rounded-lg border border-teal-100 bg-teal-50 p-4 text-sm">
+            <div className="flex items-center justify-between gap-4"><dt className="text-slate-600">Doctor</dt><dd className="font-semibold text-slate-900">{paymentToSettle?.doctor}</dd></div>
+            <div className="flex items-center justify-between gap-4"><dt className="text-slate-600">Patient</dt><dd className="font-semibold text-slate-900">{paymentToSettle?.patient}</dd></div>
+            <div className="flex items-center justify-between gap-4 border-t border-teal-200 pt-3"><dt className="font-semibold text-slate-700">Payout amount</dt><dd className="text-lg font-bold text-teal-800">₹{paymentToSettle?.doctorPayout.toFixed(2)}</dd></div>
+          </dl>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={settling}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-teal-600 text-white hover:bg-teal-700" disabled={settling} onClick={settlePayment}>{settling ? 'Saving…' : 'Confirm payout sent'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

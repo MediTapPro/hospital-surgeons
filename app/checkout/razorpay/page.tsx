@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import apiClient from '@/lib/api/httpClient';
@@ -44,6 +44,8 @@ function RazorpayCheckoutContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'success' | 'failed'>('pending');
+  const razorpayInstanceRef = useRef<any>(null);
+  const paymentSucceededRef = useRef(false);
 
   useEffect(() => {
     if (!orderId) {
@@ -52,10 +54,17 @@ function RazorpayCheckoutContent() {
       return;
     }
 
-    initializeRazorpay();
+    let cancelled = false;
+    initializeRazorpay(() => cancelled);
+
+    return () => {
+      cancelled = true;
+      razorpayInstanceRef.current?.close();
+      razorpayInstanceRef.current = null;
+    };
   }, [orderId]);
 
-  const initializeRazorpay = async () => {
+  const initializeRazorpay = async (isCancelled: () => boolean) => {
     try {
       setLoading(true);
 
@@ -65,6 +74,8 @@ function RazorpayCheckoutContent() {
       if (!scriptLoaded) {
         throw new Error('Failed to load Razorpay script');
       }
+
+      if (isCancelled()) return;
 
       // Step 2: Get Razorpay key from environment
       // Note: In production, you might want to fetch this from backend for security
@@ -97,6 +108,7 @@ function RazorpayCheckoutContent() {
         },
         modal: {
           ondismiss: function() {
+            if (paymentSucceededRef.current) return;
             // Called when user closes the modal without paying
             // Redirect based on user role from URL params
             if (isHomeVisitPayment) {
@@ -125,7 +137,10 @@ function RazorpayCheckoutContent() {
       // 4. When user completes payment, the 'handler' function is called
       // 5. If user closes modal, 'modal.ondismiss' is called
       // ============================================================
+      if (isCancelled()) return;
+
       const razorpay = new window.Razorpay(options);
+      razorpayInstanceRef.current = razorpay;
       razorpay.open(); // <-- THIS LINE OPENS THE RAZORPAY UI MODAL (POPUP)
 
       setLoading(false);
@@ -138,6 +153,7 @@ function RazorpayCheckoutContent() {
 
   const handlePaymentSuccess = async (response: any) => {
     try {
+      paymentSucceededRef.current = true;
       setPaymentStatus('success');
 
       // Verify payment with backend
@@ -149,6 +165,8 @@ function RazorpayCheckoutContent() {
       });
 
       if (verifyResponse.data.success) {
+        razorpayInstanceRef.current?.close();
+        razorpayInstanceRef.current = null;
         // Payment verified successfully
         // Redirect to success page with payment details
         // Use planId and userRole from URL params
@@ -163,6 +181,7 @@ function RazorpayCheckoutContent() {
         throw new Error(verifyResponse.data.error || 'Payment verification failed');
       }
     } catch (err: any) {
+      paymentSucceededRef.current = false;
       console.error('Payment verification error:', err);
       setPaymentStatus('failed');
       setError(err.message || 'Payment verification failed');
