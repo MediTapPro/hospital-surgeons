@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Home, 
@@ -17,7 +17,9 @@ import {
   Heart,
   Search,
   MessageSquare,
-  CreditCard
+  CreditCard,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAuthenticated, getUserRole } from '@/lib/auth/utils';
@@ -44,6 +46,8 @@ interface Profile {
   fullName: string;
   email: string;
   phone: string | null;
+  profilePhotoId: string | null;
+  profilePhotoUrl: string | null;
 }
 
 interface Booking {
@@ -88,6 +92,8 @@ export default function PatientDashboardPage() {
   const [profileForm, setProfileForm] = useState({
     fullName: ''
   });
+  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+  const [profilePhotoUploading, setProfilePhotoUploading] = useState(false);
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -481,6 +487,39 @@ export default function PatientDashboardPage() {
       toast.error('An error occurred. Please try again.');
     } finally {
       setFormSubmitting(false);
+    }
+  };
+
+  const handleProfilePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setProfilePhotoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await apiClient.post('/api/patients/profile-photo/upload', formData);
+      const result = response.data;
+
+      if (!result.success) {
+        toast.error(result.message || 'Unable to upload profile photo.');
+        return;
+      }
+
+      setProfile((currentProfile) => currentProfile
+        ? {
+            ...currentProfile,
+            profilePhotoId: result.data.profilePhotoId,
+            profilePhotoUrl: result.data.url,
+          }
+        : currentProfile);
+      toast.success('Profile photo updated successfully.');
+    } catch (error) {
+      console.error('Profile photo upload failed:', error);
+      toast.error('Unable to upload profile photo. Please try again.');
+    } finally {
+      event.target.value = '';
+      setProfilePhotoUploading(false);
     }
   };
 
@@ -1272,6 +1311,36 @@ export default function PatientDashboardPage() {
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm max-w-xl animate-fadeIn">
             <h3 className="text-lg font-bold text-slate-900 mb-1">Profile Details & Settings</h3>
             <p className="text-xs text-slate-500 mb-6">Manage your patient registration credentials and profile details.</p>
+
+            <div className="mb-6 flex items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-xl font-bold text-blue-700">
+                {profile?.profilePhotoUrl ? (
+                  <img src={profile.profilePhotoUrl} alt="Patient profile" className="h-full w-full object-cover" />
+                ) : (
+                  profile?.fullName?.charAt(0).toUpperCase() || 'P'
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-800">Profile photo</p>
+                <p className="mt-1 text-xs text-slate-500">JPG, PNG, or WebP. Maximum size 5 MB.</p>
+                <input
+                  ref={profilePhotoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleProfilePhotoUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => profilePhotoInputRef.current?.click()}
+                  disabled={profilePhotoUploading}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {profilePhotoUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                  {profilePhotoUploading ? 'Uploading photo...' : 'Upload photo'}
+                </button>
+              </div>
+            </div>
 
             <form onSubmit={handleProfileSubmit} className="space-y-4">
               <div>

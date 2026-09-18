@@ -25,6 +25,12 @@ export class PatientProfilesService {
     return updated;
   }
 
+  async updateProfilePhoto(userId: string, profilePhotoId: string) {
+    const profile = await this.getVerifiedProfile(userId);
+    const [updated] = await this.profilesRepo.updateProfilePhoto(profile.id, profilePhotoId);
+    return updated;
+  }
+
   // --- Saved Addresses ---
   async getAddresses(userId: string) {
     const profile = await this.getVerifiedProfile(userId);

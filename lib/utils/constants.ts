@@ -28,6 +28,15 @@ export const HOME_VISIT_SETTINGS_SCOPE = 'global';
 export const PATIENT_PAYMENTS_DEFAULT_LIMIT = 10;
 export const PATIENT_PAYMENTS_MAX_LIMIT = 50;
 
+export const PATIENT_PROFILE_PHOTO_BUCKET = 'images';
+export const PATIENT_PROFILE_PHOTO_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+export const PATIENT_PROFILE_PHOTO_ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+] as const;
+
 export const ASSIGNMENT_PAYMENTS_DEFAULT_LIMIT = 20;
 export const ASSIGNMENT_PAYMENTS_MAX_LIMIT = 50;
 

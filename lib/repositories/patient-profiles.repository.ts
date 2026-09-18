@@ -7,7 +7,8 @@ import {
   assignments,
   homeVisitDetails,
   doctors,
-  doctorAvailability
+  doctorAvailability,
+  files,
 } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 
@@ -46,8 +47,20 @@ export class PatientProfilesRepository {
 
   async findProfileByUserId(userId: string) {
     const result = await this.db
-      .select()
+      .select({
+        id: patientProfiles.id,
+        userId: patientProfiles.userId,
+        fullName: patientProfiles.fullName,
+        profilePhotoId: patientProfiles.profilePhotoId,
+        profilePhotoUrl: files.url,
+        email: users.email,
+        phone: users.phone,
+        createdAt: patientProfiles.createdAt,
+        updatedAt: patientProfiles.updatedAt,
+      })
       .from(patientProfiles)
+      .innerJoin(users, eq(patientProfiles.userId, users.id))
+      .leftJoin(files, eq(patientProfiles.profilePhotoId, files.id))
       .where(eq(patientProfiles.userId, userId))
       .limit(1);
     return result[0] || null;
@@ -71,6 +84,18 @@ export class PatientProfilesRepository {
       .update(patientProfiles)
       .set({
         fullName,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(patientProfiles.id, id))
+      .returning();
+  }
+
+  async updateProfilePhoto(id: string, profilePhotoId: string, tx?: any) {
+    const client = tx || this.db;
+    return await client
+      .update(patientProfiles)
+      .set({
+        profilePhotoId,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(patientProfiles.id, id))

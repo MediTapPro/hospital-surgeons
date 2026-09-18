@@ -9327,9 +9327,52 @@
         }
       }
     },
+    "/api/patients/profile-photo/upload": {
+      "post": {
+        "summary": "Upload and set the signed-in patient's profile photo",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile photo uploaded successfully"
+          },
+          "400": {
+            "description": "Invalid image or upload request"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
     "/api/patients/profile": {
       "get": {
-        "summary": "Get logged-in patient's profile details",
+        "summary": "Get logged-in patient's profile and account contact details",
         "tags": [
           "Patients"
         ],
@@ -9340,7 +9383,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Profile retrieved successfully"
+            "description": "Profile retrieved successfully, including read-only email, phone, and profile photo URL"
           },
           "401": {
             "description": "Unauthorized"

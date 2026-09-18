@@ -1526,6 +1526,7 @@ export const geometryColumns = pgView("geometry_columns", {	fTableCatalog: varch
 export const patientProfiles = pgTable("patient_profiles", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	userId: uuid("user_id").notNull(),
+	profilePhotoId: uuid("profile_photo_id"),
 	fullName: text("full_name").notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -1535,6 +1536,11 @@ export const patientProfiles = pgTable("patient_profiles", {
 		foreignColumns: [users.id],
 		name: "patient_profiles_user_id_fkey"
 	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.profilePhotoId],
+		foreignColumns: [files.id],
+		name: "patient_profiles_profile_photo_id_fkey"
+	}).onDelete("set null"),
 	unique("patient_profiles_user_id_key").on(table.userId),
 ]);
 

@@ -105,7 +105,7 @@ export class FilesService {
   /**
    * Saves file metadata in database
    */
-  async saveFileMetadata(metadata: FileMetadata): Promise<string> {
+  async saveFileMetadata(metadata: FileMetadata, client: any = this.db): Promise<string> {
     const values: any = {
       filename: metadata.filename,
       url: metadata.url,
@@ -119,7 +119,7 @@ export class FilesService {
     if (metadata.cdnUrl) values.cdnUrl = metadata.cdnUrl;
     if (metadata.isPublic !== undefined) values.isPublic = metadata.isPublic;
 
-    const [result] = await this.db
+    const [result] = await client
       .insert(files)
       .values(values)
       .returning({ id: files.id });
@@ -218,4 +218,3 @@ export class FilesService {
     }
   }
 }
-
