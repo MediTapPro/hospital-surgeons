@@ -4,6 +4,22 @@ import { HomeVisitSettingsService } from '@/lib/services/home-visit-settings.ser
 
 const settingsService = new HomeVisitSettingsService();
 
+/**
+ * @swagger
+ * /api/admin/home-visit-settings:
+ *   get:
+ *     summary: Get global home-visit settings
+ *     tags: [Admin Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *   put:
+ *     summary: Update global home-visit settings
+ *     tags: [Admin Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Settings saved }
+ *       400: { description: Invalid settings }
+ *       403: { description: Admin access required }
+ */
 async function getHandler(_req: AuthenticatedRequest) {
   const result = await settingsService.getSettings();
   return NextResponse.json(result, { status: result.success ? 200 : 500 });

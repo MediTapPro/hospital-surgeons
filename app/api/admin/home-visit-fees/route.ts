@@ -4,6 +4,22 @@ import { PlatformFeesService } from '@/lib/services/platform-fees.service';
 
 const feesService = new PlatformFeesService();
 
+/**
+ * @swagger
+ * /api/admin/home-visit-fees:
+ *   get:
+ *     summary: List home-visit fees
+ *     tags: [Admin Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *   post:
+ *     summary: Create or update a home-visit fee for a specialty
+ *     tags: [Admin Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Fee saved }
+ *       400: { description: Invalid fee details }
+ *       403: { description: Admin access required }
+ */
 async function getHandler(req: AuthenticatedRequest) {
   const result = await feesService.getPlatformFees();
   if (!result.success) {

@@ -362,8 +362,9 @@ export class HomeVisitsService {
       data: newAssignment,
       patientName,
       expiresAt,
-		paymentMode: bookingMode,
-		isFreeTrial,
+      paymentMode: bookingMode,
+      isFreeTrial,
+      doctor: await this.homeVisitsRepo.findDoctorUser(doctorId),
     };
   }
 

@@ -1,13 +1,32 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { doctors } from '@/src/db/drizzle/migrations/schema';
-import { eq } from 'drizzle-orm';
 import { createAuditLog, getRequestMetadata } from '@/lib/utils/audit-logger';
 import { withAuth, AuthenticatedRequest } from '@/lib/auth/middleware';
 import { CreateHomeVisitDtoSchema } from '@/lib/validations/home-visit.dto';
 import { validateRequest } from '@/lib/utils/validate-request';
 import { HomeVisitsService } from '@/lib/services/home-visits.service';
 
+/**
+ * @swagger
+ * /api/bookings/home-visit:
+ *   get:
+ *     summary: Get a patient's home-visit booking quote for a doctor
+ *     tags: [Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: doctorId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *   post:
+ *     summary: Create a patient home-visit booking
+ *     description: Applies availability, free-trial, and booking-time payment snapshot rules.
+ *     tags: [Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Home visit booking created }
+ *       400: { description: Invalid booking request or unavailable slot }
+ *       401: { description: Authentication required }
+ */
 async function postHandler(req: AuthenticatedRequest) {
   try {
     const user = req.user;
@@ -52,13 +71,8 @@ async function postHandler(req: AuthenticatedRequest) {
     const expiresAt = result.expiresAt;
 
     // Log audit event
-    const db = getDb();
     const metadata = getRequestMetadata(req);
-    const [doctorResult] = await db
-      .select({ firstName: doctors.firstName, lastName: doctors.lastName, userId: doctors.userId })
-      .from(doctors)
-      .where(eq(doctors.id, dto.doctorId))
-      .limit(1);
+    const doctorResult = result.doctor;
 
     const doctorName = doctorResult ? `Dr. ${doctorResult.firstName} ${doctorResult.lastName}` : null;
 

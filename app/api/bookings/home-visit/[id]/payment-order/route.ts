@@ -4,6 +4,23 @@ import { HomeVisitPaymentsService } from '@/lib/services/home-visit-payments.ser
 
 const homeVisitPaymentsService = new HomeVisitPaymentsService();
 
+/**
+ * @swagger
+ * /api/bookings/home-visit/{id}/payment-order:
+ *   post:
+ *     summary: Create a Razorpay order for a completed paid home visit
+ *     tags: [Home Visits]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       201: { description: Payment order created }
+ *       400: { description: Visit is not eligible for payment }
+ *       401: { description: Authentication required }
+ */
 async function postHandler(
   req: AuthenticatedRequest,
   context: { params: Promise<{ id: string }> }

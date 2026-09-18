@@ -351,6 +351,222 @@
         }
       }
     },
+    "/api/admin/home-visit-fees/{id}": {
+      "delete": {
+        "summary": "Delete a specialty-specific home-visit fee",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fee deleted"
+          },
+          "400": {
+            "description": "Fee cannot be deleted"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/home-visit-fees": {
+      "get": {
+        "summary": "List home-visit fees",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create or update a home-visit fee for a specialty",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fee saved"
+          },
+          "400": {
+            "description": "Invalid fee details"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/home-visit-settings": {
+      "get": {
+        "summary": "Get global home-visit settings",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Update global home-visit settings",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings saved"
+          },
+          "400": {
+            "description": "Invalid settings"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/payments/{id}/settle": {
+      "patch": {
+        "summary": "Mark a doctor settlement as paid",
+        "description": "Admin-only home-visit payout action. The patient payment must be paid and the doctor settlement pending. It records `paid_to_doctor_at` and changes settlement status to completed atomically. Hospital settlements keep their existing workflow.",
+        "tags": [
+          "Admin Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doctor settlement marked as paid"
+          },
+          "400": {
+            "description": "Record is not an eligible pending home-visit settlement",
+            "or patient payment is incomplete": null
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Settlement not found"
+          }
+        }
+      }
+    },
+    "/api/admin/payments": {
+      "get": {
+        "summary": "List assignment payment and settlement records",
+        "description": "Admin-only unified payment ledger for hospital assignments and paid home visits. Patient payment status and doctor settlement status are separate fields.",
+        "tags": [
+          "Admin Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital_assignment",
+                "home_visit"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment records retrieved successfully"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "500": {
+            "description": "Unable to load payment records"
+          }
+        }
+      }
+    },
     "/api/admin/specialties/{id}": {
       "get": {
         "summary": "Get specialty details (Admin)",
@@ -1018,6 +1234,78 @@
         }
       }
     },
+    "/api/assignments/{id}/status": {
+      "patch": {
+        "summary": "Update an assignment status",
+        "description": "Updates the assignment and any related slot or payment record atomically. Completing a paid home visit creates its pending patient-payment settlement from the booking-time fee snapshot; complimentary visits do not create a settlement.",
+        "tags": [
+          "Assignments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "declined",
+                      "completed",
+                      "cancelled"
+                    ]
+                  },
+                  "cancellationReason": {
+                    "type": "string"
+                  },
+                  "treatmentNotes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Assignment updated successfully"
+          },
+          "400": {
+            "description": "Invalid status transition or booking rule"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Assignment not found"
+          },
+          "500": {
+            "description": "Unable to update assignment"
+          }
+        }
+      }
+    },
     "/api/bookings/{id}": {
       "get": {
         "summary": "Get booking/assignment by ID",
@@ -1160,6 +1448,88 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          }
+        }
+      }
+    },
+    "/api/bookings/home-visit/{id}/payment-order": {
+      "post": {
+        "summary": "Create a Razorpay order for a completed paid home visit",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Payment order created"
+          },
+          "400": {
+            "description": "Visit is not eligible for payment"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/bookings/home-visit": {
+      "get": {
+        "summary": "Get a patient's home-visit booking quote for a doctor",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "doctorId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a patient home-visit booking",
+        "description": "Applies availability, free-trial, and booking-time payment snapshot rules.",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Home visit booking created"
+          },
+          "400": {
+            "description": "Invalid booking request or unavailable slot"
+          },
+          "401": {
+            "description": "Authentication required"
           }
         }
       }
@@ -2336,6 +2706,35 @@
               "format": "uuid"
             },
             "description": "Doctor ID"
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Optional date filter (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital",
+                "home_visit"
+              ]
+            },
+            "description": "Optional slot type filter"
+          },
+          {
+            "in": "query",
+            "name": "allSlots",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Return all slots (parent + sub-slots) in flat format"
           }
         ],
         "responses": {
@@ -2380,6 +2779,20 @@
                               "available",
                               "booked",
                               "blocked"
+                            ]
+                          },
+                          "slotType": {
+                            "type": "string",
+                            "enum": [
+                              "hospital",
+                              "home_visit"
+                            ]
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "hospital",
+                              "home_visit"
                             ]
                           },
                           "isManual": {
@@ -2457,6 +2870,14 @@
                       "blocked"
                     ],
                     "default": "available"
+                  },
+                  "slotType": {
+                    "type": "string",
+                    "enum": [
+                      "hospital",
+                      "home_visit"
+                    ],
+                    "default": "hospital"
                   },
                   "isManual": {
                     "type": "boolean",
@@ -3159,7 +3580,8 @@
     },
     "/api/doctors/{id}/payments": {
       "get": {
-        "summary": "Get payments for a doctor",
+        "summary": "List a doctor's assignment payments and settlement balances",
+        "description": "Returns hospital-assignment and home-visit records. `patientPaymentStatus` applies to home visits; `paymentStatus` is always the doctor-settlement status.",
         "tags": [
           "Doctors"
         ],
@@ -3176,8 +3598,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "description": "Doctor ID"
+            }
           },
           {
             "in": "query",
@@ -3185,17 +3606,27 @@
             "schema": {
               "type": "integer",
               "default": 1
-            },
-            "description": "Page number"
+            }
           },
           {
             "in": "query",
             "name": "limit",
             "schema": {
               "type": "integer",
-              "default": 20
-            },
-            "description": "Items per page"
+              "default": 20,
+              "maximum": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital_assignment",
+                "home_visit"
+              ]
+            }
           },
           {
             "in": "query",
@@ -3208,139 +3639,18 @@
                 "completed",
                 "failed"
               ]
-            },
-            "description": "Filter by payment status"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Payments retrieved successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "payments": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "assignmentId": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "consultationFee": {
-                                "type": "number"
-                              },
-                              "platformCommission": {
-                                "type": "number"
-                              },
-                              "doctorPayout": {
-                                "type": "number"
-                              },
-                              "paymentStatus": {
-                                "type": "string",
-                                "enum": [
-                                  "pending",
-                                  "processing",
-                                  "completed",
-                                  "failed"
-                                ]
-                              },
-                              "paidToDoctorAt": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "assignment": {
-                                "type": "object",
-                                "properties": {
-                                  "completedAt": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                    "nullable": true
-                                  },
-                                  "status": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "hospital": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "format": "uuid"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "patient": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "format": "uuid"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "pagination": {
-                          "type": "object",
-                          "properties": {
-                            "page": {
-                              "type": "integer"
-                            },
-                            "limit": {
-                              "type": "integer"
-                            },
-                            "total": {
-                              "type": "integer"
-                            },
-                            "totalPages": {
-                              "type": "integer"
-                            },
-                            "hasNextPage": {
-                              "type": "boolean"
-                            },
-                            "hasPrevPage": {
-                              "type": "boolean"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Payments retrieved successfully"
           },
           "403": {
-            "description": "Doctor can only view their own payments"
+            "description": "Doctor can only view their own payment records"
           },
           "500": {
-            "description": "Internal server error"
+            "description": "Unable to load payment records"
           }
         }
       }
@@ -8477,6 +8787,678 @@
         }
       }
     },
+    "/api/patients/addresses/{id}": {
+      "put": {
+        "summary": "Update a specific saved address by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved address ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "addressText": {
+                    "type": "string"
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "isDefault": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Address updated successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Address not found or unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a specific saved address by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved address ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Address deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Address not found or unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/addresses": {
+      "get": {
+        "summary": "Get logged-in patient's saved addresses",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of saved addresses"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new saved address for the logged-in patient",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "label",
+                  "addressText"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "example": "Home"
+                  },
+                  "addressText": {
+                    "type": "string",
+                    "example": "123 Main St, Bandra, Mumbai"
+                  },
+                  "latitude": {
+                    "type": "number",
+                    "example": 19.076
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "example": 72.877
+                  },
+                  "isDefault": {
+                    "type": "boolean",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Address saved successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/bookings": {
+      "get": {
+        "summary": "Get logged-in patient's home visit bookings",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of the patient's home visit bookings"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/doctors/search": {
+      "get": {
+        "summary": "Search verified doctors for home visits by name, specialty or radius",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Free text search across doctor name or specialty name"
+          },
+          {
+            "in": "query",
+            "name": "specialtyId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter doctors that have this specialty"
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "description": "Latitude of the search center. Optional — when omitted, the patient's default saved address is used."
+          },
+          {
+            "in": "query",
+            "name": "lon",
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "description": "Longitude of the search center. Optional — when omitted, the patient's default saved address is used."
+          },
+          {
+            "in": "query",
+            "name": "radius",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Search radius in kilometers"
+          },
+          {
+            "in": "query",
+            "name": "minRating",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "description": "Minimum average rating"
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "distance",
+                "rating",
+                "experience"
+              ],
+              "default": "distance"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortOrder",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "description": "Defaults to asc for distance, desc for rating/experience"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of doctors matched by the search"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/patients/family-members/{id}": {
+      "put": {
+        "summary": "Update a specific saved family member by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved family member ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullName": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "relationship": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Family member updated successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Family member not found or unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a specific saved family member by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved family member ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Family member deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Family member not found or unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/family-members": {
+      "get": {
+        "summary": "Get logged-in patient's saved family members",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of saved family members"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new saved family member for the logged-in patient",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fullName",
+                  "phone",
+                  "relationship"
+                ],
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "example": "Jane Doe Jr."
+                  },
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543211"
+                  },
+                  "relationship": {
+                    "type": "string",
+                    "example": "Child"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Family member saved successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/payments": {
+      "get": {
+        "summary": "List a patient's completed home-visit payment transactions",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment history retrieved"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/patients/profile": {
+      "get": {
+        "summary": "Get logged-in patient's profile details",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update logged-in patient's profile details",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fullName"
+                ],
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "example": "Jane Doe"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully"
+          },
+          "400": {
+            "description": "Invalid parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/signup": {
+      "post": {
+        "summary": "Register a new patient",
+        "tags": [
+          "Patients"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password",
+                  "fullName"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "example": "patient@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "example": "SecurePassword123!"
+                  },
+                  "fullName": {
+                    "type": "string",
+                    "example": "John Doe"
+                  },
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210"
+                  },
+                  "device": {
+                    "type": "object",
+                    "properties": {
+                      "device_token": {
+                        "type": "string"
+                      },
+                      "device_type": {
+                        "type": "string",
+                        "enum": [
+                          "ios",
+                          "android",
+                          "web"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Patient registered successfully"
+          },
+          "400": {
+            "description": "Bad request / validation failure"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
     "/api/payments/{id}": {
       "get": {
         "summary": "Get payment by ID",
@@ -8878,7 +9860,7 @@
     "/api/payments/verify": {
       "post": {
         "summary": "Verify payment after successful transaction",
-        "description": "Verifies Razorpay payment signature, updates order status, creates payment transaction record, and creates subscription if payment is successful. Also handles upgrades and billing cycle changes automatically.",
+        "description": "Verifies a Razorpay payment. For a completed paid home visit, it atomically records the patient payment and makes the doctor settlement pending. Subscription flows keep their existing lifecycle.",
         "tags": [
           "Payments"
         ],
