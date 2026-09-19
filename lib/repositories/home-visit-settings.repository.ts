@@ -10,6 +10,7 @@ export interface HomeVisitSettingsValues {
   freeTrialVisitLimit: number;
   freeTrialActiveBookingLimit: number;
   paidPaymentTiming: HomeVisitPaymentTiming;
+  allowEarlyAssignmentCompletion: boolean;
 }
 
 export class HomeVisitSettingsRepository {

@@ -29,6 +29,9 @@ export function StatusBadge({ status, variant = 'default' }: StatusBadgeProps) {
     if (normalized.includes('routine')) {
       return 'bg-blue-100 text-blue-700';
     }
+    if (normalized.includes('accepted')) {
+      return 'bg-blue-100 text-blue-700';
+    }
     return 'bg-slate-100 text-slate-700';
   };
 

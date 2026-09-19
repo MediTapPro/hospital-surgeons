@@ -1,10 +1,24 @@
 import { getDb } from '@/lib/db';
-import { specialties, doctorSpecialties, hospitalDepartments, assignments } from '@/src/db/drizzle/migrations/schema';
-import { eq, desc, asc, count } from 'drizzle-orm';
+import {
+  specialties,
+  doctorSpecialties,
+  hospitalDepartments,
+  assignments,
+  procedureCategories,
+  procedures,
+  doctorProcedureFees,
+  platformHomeVisitFees,
+} from '@/src/db/drizzle/migrations/schema';
+import { eq, desc, asc, count, countDistinct, ilike, sql, and } from 'drizzle-orm';
+import type {
+  SpecialtyReferenceCounts,
+  SpecialtySortField,
+  SpecialtySortOrder,
+} from '@/lib/enums/specialties.enums';
 
 export interface CreateSpecialtyData {
   name: string;
-  description?: string;
+  description?: string | null;
 }
 
 export interface SpecialtyQuery {
@@ -14,8 +28,16 @@ export interface SpecialtyQuery {
   sortOrder?: 'asc' | 'desc';
 }
 
+export interface ListSpecialtiesForAdminInput {
+  page: number;
+  limit: number;
+  search?: string;
+  sortBy: SpecialtySortField;
+  sortOrder: SpecialtySortOrder;
+}
+
 export class SpecialtiesRepository {
-  private db = getDb();
+  constructor(private readonly db: any = getDb()) {}
 
   async createSpecialty(specialtyData: CreateSpecialtyData) {
     return await this.db
@@ -47,6 +69,28 @@ export class SpecialtiesRepository {
     return result[0] || null;
   }
 
+  /**
+   * Case-insensitive exact-name lookup. Uses lower() equality rather than ILIKE so a
+   * name containing % or _ cannot act as a wildcard. Pass `excludeId` when checking a
+   * rename so the record being updated does not match itself.
+   */
+  async findSpecialtyByNameInsensitive(name: string, excludeId?: string) {
+    const normalizedName = name.trim().toLowerCase();
+    const conditions = [sql`lower(${specialties.name}) = ${normalizedName}`];
+
+    if (excludeId) {
+      conditions.push(sql`${specialties.id} <> ${excludeId}`);
+    }
+
+    const result = await this.db
+      .select()
+      .from(specialties)
+      .where(and(...conditions))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
   async findSpecialties(query: SpecialtyQuery) {
     const page = query.page || 1;
     const limit = query.limit || 10;
@@ -63,12 +107,48 @@ export class SpecialtiesRepository {
       .offset(offset);
   }
 
+  async listForAdmin(input: ListSpecialtiesForAdminInput) {
+    const whereClause = input.search
+      ? ilike(specialties.name, `%${input.search}%`)
+      : undefined;
+
+    const sortColumns: Record<SpecialtySortField, any> = {
+      name: specialties.name,
+      id: specialties.id,
+    };
+    const sortColumn = sortColumns[input.sortBy] ?? specialties.name;
+
+    const [totalRows, rows] = await Promise.all([
+      this.db
+        .select({ count: sql<number>`count(*)` })
+        .from(specialties)
+        .where(whereClause),
+      this.db
+        .select({
+          id: specialties.id,
+          name: specialties.name,
+          description: specialties.description,
+          activeDoctors: countDistinct(doctorSpecialties.doctorId),
+          activeHospitals: countDistinct(hospitalDepartments.hospitalId),
+        })
+        .from(specialties)
+        .leftJoin(doctorSpecialties, eq(doctorSpecialties.specialtyId, specialties.id))
+        .leftJoin(hospitalDepartments, eq(hospitalDepartments.specialtyId, specialties.id))
+        .where(whereClause)
+        .groupBy(specialties.id)
+        .orderBy(input.sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn))
+        .limit(input.limit)
+        .offset((input.page - 1) * input.limit),
+    ]);
+
+    return { rows, total: Number(totalRows[0]?.count ?? 0) };
+  }
+
   async updateSpecialty(id: string, updateData: Partial<CreateSpecialtyData>) {
     const updateFields: any = {};
-    
+
     if (updateData.name) updateFields.name = updateData.name;
     if (updateData.description !== undefined) updateFields.description = updateData.description;
-    // Remove isActive - doesn't exist in database
 
     return await this.db
       .update(specialties)
@@ -93,20 +173,15 @@ export class SpecialtiesRepository {
   }
 
   async getSpecialtyStats(id: string) {
-    // Note: assignments don't have specialtyId directly
-    // Get specialty from doctorSpecialties via doctorId in assignments
     const result = await this.db
       .select({
         specialty: specialties,
         doctorCount: count(doctorSpecialties.id),
         hospitalCount: count(hospitalDepartments.id),
-        // assignmentCount: Get via doctorSpecialties -> assignments (complex join)
-        // For now, we'll get doctor count which indicates usage
       })
       .from(specialties)
       .leftJoin(doctorSpecialties, eq(specialties.id, doctorSpecialties.specialtyId))
       .leftJoin(hospitalDepartments, eq(specialties.id, hospitalDepartments.specialtyId))
-      // Removed bookings join - assignments don't have specialtyId
       .where(eq(specialties.id, id))
       .groupBy(specialties.id);
 
@@ -114,43 +189,65 @@ export class SpecialtiesRepository {
   }
 
   async getAllSpecialtiesStats() {
-    // Note: assignments don't have specialtyId directly
     return await this.db
       .select({
         specialty: specialties,
         doctorCount: count(doctorSpecialties.id),
         hospitalCount: count(hospitalDepartments.id),
-        // assignmentCount: Removed - assignments don't have specialtyId
       })
       .from(specialties)
       .leftJoin(doctorSpecialties, eq(specialties.id, doctorSpecialties.specialtyId))
       .leftJoin(hospitalDepartments, eq(specialties.id, hospitalDepartments.specialtyId))
-      // Removed bookings join - assignments don't have specialtyId
       .groupBy(specialties.id)
       .orderBy(asc(specialties.name));
   }
 
-  async isSpecialtyInUse(id: string) {
-    const doctorCount = await this.db
-      .select({ count: count() })
-      .from(doctorSpecialties)
-      .where(eq(doctorSpecialties.specialtyId, id));
+  /**
+   * Counts every row that references this specialty. All seven foreign keys must be
+   * checked because six cascade on delete and `assignments` is set to null, so a
+   * partial check would destroy or detach referencing data silently.
+   */
+  async countReferences(id: string): Promise<SpecialtyReferenceCounts> {
+    const toNumber = (rows: { count: unknown }[]) => Number(rows[0]?.count ?? 0);
 
-    const hospitalCount = await this.db
-      .select({ count: count() })
-      .from(hospitalDepartments)
-      .where(eq(hospitalDepartments.specialtyId, id));
-
-    // Note: assignments don't have specialtyId directly
-    // Specialty is determined via doctorSpecialties -> assignments
-    // For simplicity, we'll just check doctor and hospital usage
-    const assignmentCount = { count: 0 }; // Placeholder - complex to calculate
+    const [
+      doctorRows,
+      hospitalRows,
+      procedureCategoryRows,
+      procedureRows,
+      assignmentRows,
+      doctorProcedureFeeRows,
+      homeVisitFeeRows,
+    ] = await Promise.all([
+      this.db.select({ count: count() }).from(doctorSpecialties).where(eq(doctorSpecialties.specialtyId, id)),
+      this.db.select({ count: count() }).from(hospitalDepartments).where(eq(hospitalDepartments.specialtyId, id)),
+      this.db.select({ count: count() }).from(procedureCategories).where(eq(procedureCategories.specialtyId, id)),
+      this.db.select({ count: count() }).from(procedures).where(eq(procedures.specialtyId, id)),
+      this.db.select({ count: count() }).from(assignments).where(eq(assignments.specialtyId, id)),
+      this.db.select({ count: count() }).from(doctorProcedureFees).where(eq(doctorProcedureFees.specialtyId, id)),
+      this.db.select({ count: count() }).from(platformHomeVisitFees).where(eq(platformHomeVisitFees.specialtyId, id)),
+    ]);
 
     return {
-      isInUse: doctorCount[0].count > 0 || hospitalCount[0].count > 0,
-      doctorCount: doctorCount[0].count,
-      hospitalCount: hospitalCount[0].count,
-      assignmentCount: assignmentCount.count, // Replaced bookingCount
+      doctors: toNumber(doctorRows),
+      hospitals: toNumber(hospitalRows),
+      procedureCategories: toNumber(procedureCategoryRows),
+      procedures: toNumber(procedureRows),
+      assignments: toNumber(assignmentRows),
+      doctorProcedureFees: toNumber(doctorProcedureFeeRows),
+      homeVisitFees: toNumber(homeVisitFeeRows),
+    };
+  }
+
+  async isSpecialtyInUse(id: string) {
+    const counts = await this.countReferences(id);
+
+    return {
+      isInUse: Object.values(counts).some((referenceCount) => referenceCount > 0),
+      doctorCount: counts.doctors,
+      hospitalCount: counts.hospitals,
+      assignmentCount: counts.assignments,
+      counts,
     };
   }
 
@@ -163,8 +260,4 @@ export class SpecialtiesRepository {
       })))
       .returning();
   }
-
-  // Removed toggleSpecialtyStatus - isActive field doesn't exist in database
 }
-
-

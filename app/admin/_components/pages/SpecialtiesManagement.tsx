@@ -4,14 +4,24 @@ import { useState, useEffect } from 'react';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Search, Plus, Edit, Trash2, Loader2, ListTree, Tag } from 'lucide-react';
-import { StatusBadge } from '../StatusBadge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Search, Plus, Edit, Trash2, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import { Label } from '../ui/label';
-import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 import { ProceduresManagement } from './ProceduresManagement';
+import { SPECIALTY_LIST_DEFAULT_LIMIT } from '@/lib/enums/specialties.enums';
 
 interface Specialty {
   id: string;
@@ -19,134 +29,85 @@ interface Specialty {
   description: string | null;
   activeDoctors: number;
   activeHospitals: number;
-  status: string;
 }
 
 export function SpecialtiesManagement() {
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [isCreating, setIsCreating] = useState(false);
-  const [editingSpecialty, setEditingSpecialty] = useState<Specialty | null>(null);
   const [formData, setFormData] = useState({ name: '', description: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [specialtyToDelete, setSpecialtyToDelete] = useState<Specialty | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [selectedSpecialtyForProcedures, setSelectedSpecialtyForProcedures] = useState<Specialty | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
     fetchSpecialties();
-  }, [searchQuery]);
+  }, [page, searchQuery]);
 
   const fetchSpecialties = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: SPECIALTY_LIST_DEFAULT_LIMIT.toString(),
+      });
       if (searchQuery) {
         params.append('search', searchQuery);
       }
-      params.append('limit', '100');
 
-      const res = await fetch(`/api/admin/specialties?${params.toString()}`);
-      const data = await res.json();
+      const response = await apiClient.get(`/api/admin/specialties?${params.toString()}`);
+      const data = response.data;
 
       if (data.success) {
         setSpecialties(data.data || []);
+        setTotalPages(data.pagination?.totalPages || 1);
       } else {
         toast.error(data.message || 'Failed to fetch specialties');
       }
-    } catch (error) {
-      console.error('Error fetching specialties:', error);
-      toast.error('Failed to fetch specialties');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to fetch specialties');
     } finally {
       setLoading(false);
     }
   };
 
-  const validateForm = () => {
-    // Name is required
-    if (!formData.name.trim()) return false;
-    return true;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Validate required fields
-    if (!validateForm()) {
+  const handleSubmit = async () => {
+    if (!formData.name.trim()) {
       toast.error('Please fill all required fields');
       return;
     }
 
     try {
       setSubmitting(true);
-      const url = editingSpecialty
-        ? `/api/admin/specialties/${editingSpecialty.id}`
-        : '/api/admin/specialties';
-      
-      const method = editingSpecialty ? 'PUT' : 'POST';
-      
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name.trim(),
-          description: formData.description.trim() || null,
-        }),
+      const response = await apiClient.post('/api/admin/specialties', {
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
       });
-
-      const data = await res.json();
+      const data = response.data;
 
       if (data.success) {
-        toast.success(editingSpecialty ? 'Specialty updated successfully' : 'Specialty created successfully');
+        toast.success('Specialty created successfully');
         const savedSpecialty = data.data;
         setIsCreating(false);
-        setEditingSpecialty(null);
         setFormData({ name: '', description: '' });
         fetchSpecialties();
-        
-        // Auto-open hierarchy modal for newly created specialty
-        if (!editingSpecialty && savedSpecialty) {
-            setSelectedSpecialtyForProcedures(savedSpecialty);
-            setIsEditMode(true);
+
+        if (savedSpecialty) {
+          setSelectedSpecialtyForProcedures(savedSpecialty);
+          setIsEditMode(true);
         }
       } else {
         toast.error(data.message || 'Failed to save specialty');
       }
-    } catch (error) {
-      console.error('Error saving specialty:', error);
-      toast.error('Failed to save specialty');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to save specialty');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-
-
-  const handleDelete = async (specialty: Specialty) => {
-    if (!confirm(`Are you sure you want to delete "${specialty.name}"? This action cannot be undone.`)) {
-      return;
-    }
-
-    try {
-      setDeletingId(specialty.id);
-      const res = await fetch(`/api/admin/specialties/${specialty.id}`, {
-        method: 'DELETE',
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        toast.success('Specialty deleted successfully');
-        fetchSpecialties();
-      } else {
-        toast.error(data.message || 'Failed to delete specialty');
-      }
-    } catch (error) {
-      console.error('Error deleting specialty:', error);
-      toast.error('Failed to delete specialty');
-    } finally {
-      setDeletingId(null);
     }
   };
 
@@ -155,15 +116,105 @@ export function SpecialtiesManagement() {
     setFormData({ name: '', description: '' });
   };
 
-  const filteredSpecialties = specialties.filter((specialty) =>
-    specialty.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (specialty.description && specialty.description.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const handleDelete = async () => {
+    if (!specialtyToDelete) return;
+
+    try {
+      setDeleting(true);
+      const response = await apiClient.delete(`/api/admin/specialties/${specialtyToDelete.id}`);
+      const data = response.data;
+
+      if (data.success) {
+        toast.success('Specialty deleted successfully');
+        setSpecialtyToDelete(null);
+        fetchSpecialties();
+      } else {
+        toast.error(data.message || 'Failed to delete specialty');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to delete specialty');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const columns: AdminDataTableColumn<Specialty>[] = [
+    {
+      id: 'specialty',
+      label: 'Specialty',
+      widthClassName: 'w-[26%]',
+      cell: (specialty) => (
+        <span className="font-medium text-slate-900">{specialty.name}</span>
+      ),
+    },
+    {
+      id: 'description',
+      label: 'Description',
+      widthClassName: 'w-[30%]',
+      cell: (specialty) => (
+        <span className="block truncate text-slate-600">{specialty.description || '-'}</span>
+      ),
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      widthClassName: 'w-[20%]',
+      cell: (specialty) => (
+        <div className="flex flex-col gap-1 text-xs text-slate-600">
+          <span>{specialty.activeDoctors} Doctors</span>
+          <span>{specialty.activeHospitals} Hospitals</span>
+        </div>
+      ),
+    },
+    {
+      id: 'actions',
+      label: 'Actions',
+      widthClassName: 'w-[28%]',
+      sticky: 'right',
+      headerClassName: 'min-w-[260px]',
+      cellClassName: 'min-w-[260px]',
+      cell: (specialty) => (
+        <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setSelectedSpecialtyForProcedures(specialty);
+              setIsEditMode(false);
+            }}
+            className="border-slate-200 text-slate-700 hover:bg-slate-50"
+          >
+            View
+          </Button>
+          <Button
+            size="sm"
+            className="bg-navy-600 text-white hover:bg-navy-700"
+            onClick={() => {
+              setSelectedSpecialtyForProcedures(specialty);
+              setIsEditMode(true);
+            }}
+          >
+            Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSpecialtyToDelete(specialty)}
+            className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+            aria-label={`Delete ${specialty.name}`}
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="sr-only sm:not-sr-only">Delete</span>
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <PageHeader 
-        title="Medical & Clinical Management" 
+    <div className="min-h-full bg-slate-50">
+      <PageHeader
+        title="Medical & Clinical Management"
         description="Manage medical specialties, therapeutic categories, and clinical procedures"
         actions={
           <Button onClick={() => setIsCreating(true)} className="bg-navy-600 hover:bg-navy-700" disabled={isCreating}>
@@ -173,9 +224,9 @@ export function SpecialtiesManagement() {
         }
       />
 
-      <div className="p-8">
+      <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
         <div className="space-y-6">
-          
+
           {isCreating && (
             <div className="bg-white rounded-xl shadow-lg border border-navy-100 p-8 animate-in slide-in-from-top-4 duration-300">
               <div className="flex items-center justify-between mb-6">
@@ -187,9 +238,9 @@ export function SpecialtiesManagement() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Specialty *</Label>
-                  <Input 
+                  <Input
                     value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Enter Specialty (e.g. Cardiology)"
                     className="h-11 border-slate-200 focus:border-teal-500 focus:ring-teal-500"
                     autoFocus
@@ -197,9 +248,9 @@ export function SpecialtiesManagement() {
                 </div>
                 <div className="space-y-2">
                   <Label className="text-slate-700 font-semibold">Description</Label>
-                  <Input 
+                  <Input
                     value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Brief overview of the therapeutic focus"
                     className="h-11 border-slate-200 focus:border-teal-500 focus:ring-teal-500"
                   />
@@ -221,119 +272,102 @@ export function SpecialtiesManagement() {
             </div>
           )}
 
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-4 border-b border-slate-200">
-              <div className="relative">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+              <div className="relative max-w-2xl">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <Input
                   placeholder="Search specialties..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  className="h-11 border-slate-300 bg-white pl-10 shadow-sm"
                 />
               </div>
             </div>
 
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
+              <div className="p-8 text-center">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-teal-600 mb-4" />
+                <p className="text-slate-600">Loading specialties...</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-slate-600">Specialty</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Description</th>
-                      <th className="px-6 py-3 text-left text-slate-600 font-medium">Analytics</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                      {filteredSpecialties.length === 0 && !isCreating ? (
-                        <tr>
-                          <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                            {searchQuery ? 'No specialties found matching your search' : 'No specialties found'}
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredSpecialties.map((specialty) => (
-                          <tr key={specialty.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-6 py-4 text-slate-900 font-medium">{specialty.name}</td>
-                            <td className="px-6 py-4 text-slate-600 max-w-xs truncate">{specialty.description || '-'}</td>
-                            <td className="px-6 py-4 text-slate-600">
-                              <div className="flex flex-col text-xs gap-1">
-                                <span>{specialty.activeDoctors} Doctors</span>
-                                <span>{specialty.activeHospitals} Hospitals</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <StatusBadge status={specialty.status} />
-                            </td>
-                             <td className="px-6 py-4">
-                               <div className="flex items-center gap-2">
-                                 <Button 
-                                   size="sm" 
-                                   variant="outline"
-                                   onClick={() => {
-                                     setSelectedSpecialtyForProcedures(specialty);
-                                     setIsEditMode(false);
-                                   }}
-                                   className="text-slate-600 border-slate-200 hover:bg-slate-50"
-                                 >
-                                   View
-                                 </Button>
-                                 <Button 
-                                   size="sm" 
-                                   className="bg-navy-600 text-white hover:bg-navy-700"
-                                   onClick={() => {
-                                     setSelectedSpecialtyForProcedures(specialty);
-                                     setIsEditMode(true);
-                                   }}
-                                 >
-                                   Edit
-                                 </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="ghost"
-                                  onClick={() => handleDelete(specialty)}
-                                  disabled={deletingId === specialty.id}
-                                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                                >
-                                  {deletingId === specialty.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="w-4 h-4" />
-                                  )}
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+              <AdminDataTable
+                columns={columns}
+                data={specialties}
+                emptyMessage="No specialties found"
+                getRowKey={(specialty) => specialty.id}
+                minWidthClassName="min-w-[980px]"
+              />
+            )}
+
+            {!loading && totalPages > 1 && (
+              <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-slate-600">
+                  Page {page} of {totalPages}
                 </div>
-              )}
-            </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    disabled={page === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                    disabled={page === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+      </div>
 
-      <Dialog 
-        open={!!selectedSpecialtyForProcedures} 
-        onOpenChange={(open) => !open && setSelectedSpecialtyForProcedures(null)}
+      <Dialog
+        open={!!selectedSpecialtyForProcedures}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedSpecialtyForProcedures(null);
+            setIsEditMode(false);
+          }
+        }}
       >
-        <DialogContent className="max-w-[95vw] sm:max-w-[90vw] md:max-w-4xl lg:max-w-5xl bg-white max-h-[90vh] overflow-y-auto p-0">
-          <DialogHeader className="p-6 border-b border-slate-100 bg-slate-50/50">
-            <DialogTitle className="text-xl text-slate-900 flex items-center justify-between">
-              <span>{isEditMode ? 'Edit' : 'View'} Hierarchy - {selectedSpecialtyForProcedures?.name}</span>
-            </DialogTitle>
+        <DialogContent className="flex max-h-[90vh] max-w-[95vw] flex-col overflow-hidden bg-white p-0 sm:max-w-[90vw] lg:max-w-6xl">
+          <DialogHeader className="border-b border-slate-200 bg-white px-6 py-5">
+            <div className="flex items-start justify-between gap-4 pr-8">
+              <div className="space-y-1">
+                <DialogTitle className="text-xl text-slate-900">
+                  {isEditMode ? 'Edit hierarchy' : 'View hierarchy'}
+                </DialogTitle>
+                <DialogDescription className="text-sm text-slate-500">
+                  {selectedSpecialtyForProcedures?.name} · manage its specialty, categories, and procedures
+                </DialogDescription>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsEditMode((current) => !current)}
+                aria-label={isEditMode ? 'View specialty hierarchy' : 'Edit specialty hierarchy'}
+                className="border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                {isEditMode ? 'View' : 'Edit'}
+              </Button>
+            </div>
           </DialogHeader>
           {selectedSpecialtyForProcedures && (
-            <div className="flex-1 overflow-y-auto">
-              <ProceduresManagement 
-                specialtyId={selectedSpecialtyForProcedures.id} 
+            <div className="max-h-[calc(90vh-96px)] overflow-y-auto">
+              <ProceduresManagement
+                key={`${selectedSpecialtyForProcedures.id}-${isEditMode ? 'edit' : 'view'}`}
+                specialtyId={selectedSpecialtyForProcedures.id}
                 specialtyName={selectedSpecialtyForProcedures.name}
                 hideHeader
                 readOnly={!isEditMode}
@@ -343,6 +377,30 @@ export function SpecialtiesManagement() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={Boolean(specialtyToDelete)}
+        onOpenChange={(open) => !open && setSpecialtyToDelete(null)}
+      >
+        <AlertDialogContent className="max-w-md border-slate-200 bg-white p-6 shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete specialty</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{specialtyToDelete?.name}&quot;? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? 'Deleting...' : 'Delete specialty'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

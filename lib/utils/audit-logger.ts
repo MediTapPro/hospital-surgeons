@@ -1,7 +1,7 @@
 import { getDb } from '@/lib/db';
 import { auditLogs } from '@/src/db/drizzle/migrations/schema';
 
-interface AuditLogData {
+export interface AuditLogData {
   userId?: string | null;
   actorType: 'admin' | 'user' | 'system' | 'webhook';
   action: string;
@@ -21,12 +21,23 @@ interface AuditLogData {
 }
 
 /**
+ * Minimal client contract needed to write an audit row. Accepting this instead of
+ * the concrete database type lets callers pass a transaction client so the audit
+ * record is committed atomically with the operation it describes.
+ */
+type AuditLogClient = Pick<ReturnType<typeof getDb>, 'insert'>;
+
+/**
  * Centralized audit logger for all write operations
  * Logs asynchronously to avoid blocking main operations
  */
-export async function createAuditLog(data: AuditLogData): Promise<void> {
+export async function createAuditLog(
+  data: AuditLogData,
+  client?: AuditLogClient,
+  options?: { throwOnError?: boolean }
+): Promise<void> {
   try {
-    const db = getDb();
+    const db: AuditLogClient = client ?? getDb();
 
     // Build details object with all relevant information
     const details: Record<string, any> = {
@@ -55,6 +66,7 @@ export async function createAuditLog(data: AuditLogData): Promise<void> {
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
+    if (options?.throwOnError) throw error;
     // Log error but don't throw - audit logging should never break main operations
     console.error('Error creating audit log:', error);
   }
@@ -98,4 +110,3 @@ export function buildChangesObject(
 
   return changes;
 }
-

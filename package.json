@@ -12,7 +12,8 @@
     "db:introspect": "drizzle-kit introspect --config=./src/drizzle/drizzle.config.ts",
     "db:push": "drizzle-kit push --config=./src/drizzle/drizzle.config.ts",
     "db:pull": "drizzle-kit pull --config=./src/drizzle/drizzle.config.ts",
-    "db:studio": "drizzle-kit studio --config=./src/drizzle/drizzle.config.ts"
+    "db:studio": "drizzle-kit studio --config=./src/drizzle/drizzle.config.ts",
+    "swagger:generate": "node scripts/generate-swagger.js"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.3",

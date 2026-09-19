@@ -45,7 +45,7 @@ import { signToken } from '@/lib/auth/jwt';
  *                     enum: [ios, android, web]
  *     responses:
  *       201:
- *         description: Patient registered successfully
+ *         description: Patient registered successfully. Patient accounts are immediately active and do not require provider verification.
  *       400:
  *         description: Bad request / validation failure
  *       500:

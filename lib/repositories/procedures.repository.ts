@@ -1,18 +1,24 @@
 import { getDb } from '@/lib/db';
-import { 
-  procedures, 
-  procedureCategories, 
-  procedureTypes, 
+import {
+  procedures,
+  procedureCategories,
+  procedureTypes,
   specialties,
-  procedureTypeMappings
+  procedureTypeMappings,
+  doctorProcedureFees,
+  assignments,
 } from '@/src/db/drizzle/migrations/schema';
-import { eq, desc, asc, sql, and, ilike } from 'drizzle-orm';
+import { eq, asc, count, and, ilike, sql } from 'drizzle-orm';
+import type {
+  ProcedureReferenceCounts,
+  CategoryReferenceCounts,
+} from '@/lib/enums/procedures.enums';
 
 export interface CreateProcedureData {
   specialtyId: string;
-  categoryId?: string;
+  categoryId?: string | null;
   name: string;
-  description?: string;
+  description?: string | null;
   isActive?: boolean;
   typeIds?: string[];
 }
@@ -20,7 +26,7 @@ export interface CreateProcedureData {
 export interface CreateCategoryData {
   specialtyId: string;
   name: string;
-  description?: string;
+  description?: string | null;
 }
 
 export interface CreateProcedureTypeData {
@@ -29,34 +35,34 @@ export interface CreateProcedureTypeData {
 }
 
 export class ProceduresRepository {
-  private db = getDb();
+  constructor(private readonly db: any = getDb()) {}
 
   // --- Procedures ---
 
   async createProcedure(data: CreateProcedureData) {
-    return await this.db.transaction(async (tx) => {
-      const [procedure] = await tx
-        .insert(procedures)
-        .values({
-          specialtyId: data.specialtyId,
-          categoryId: data.categoryId || null,
-          name: data.name,
-          description: data.description || null,
-          isActive: data.isActive !== undefined ? data.isActive : true,
-        })
-        .returning();
+    const [procedure] = await this.db
+      .insert(procedures)
+      .values({
+        specialtyId: data.specialtyId,
+        categoryId: data.categoryId || null,
+        name: data.name,
+        description: data.description || null,
+        isActive: data.isActive !== undefined ? data.isActive : true,
+      })
+      .returning();
 
-      if (data.typeIds && data.typeIds.length > 0) {
-        await tx.insert(procedureTypeMappings).values(
-          data.typeIds.map(typeId => ({
-            procedureId: procedure.id,
-            typeId,
-          }))
-        );
-      }
+    if (!procedure) return null;
 
-      return procedure;
-    });
+    if (data.typeIds && data.typeIds.length > 0) {
+      await this.db.insert(procedureTypeMappings).values(
+        data.typeIds.map(typeId => ({
+          procedureId: procedure.id,
+          typeId,
+        }))
+      );
+    }
+
+    return procedure;
   }
 
   async findProcedures(filters: { specialtyId?: string; categoryId?: string; search?: string } = {}) {
@@ -91,7 +97,7 @@ export class ProceduresRepository {
       .from(procedures)
       .where(eq(procedures.id, id))
       .limit(1)
-      .then(res => res[0] || null);
+      .then((res: any[]) => res[0] || null);
 
     if (procedure) {
       const mappings = await this.db
@@ -101,55 +107,103 @@ export class ProceduresRepository {
 
       return {
         ...procedure,
-        typeIds: mappings.map(m => m.typeId)
+        typeIds: mappings.map((m: any) => m.typeId)
       };
     }
 
     return null;
   }
 
+  /**
+   * Scoped case-insensitive name lookup. Procedure names are unique per specialty, so the
+   * specialty is part of the match. Uses lower() equality rather than ILIKE so a name
+   * containing % or _ cannot act as a wildcard. Pass `excludeId` when checking a rename.
+   */
+  async findProcedureByNameInsensitive(name: string, specialtyId: string, excludeId?: string) {
+    const conditions = [
+      eq(procedures.specialtyId, specialtyId),
+      sql`lower(${procedures.name}) = ${name.trim().toLowerCase()}`,
+    ];
+
+    if (excludeId) {
+      conditions.push(sql`${procedures.id} <> ${excludeId}`);
+    }
+
+    const result = await this.db
+      .select()
+      .from(procedures)
+      .where(and(...conditions))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
   async updateProcedure(id: string, data: Partial<CreateProcedureData>) {
-    return await this.db.transaction(async (tx) => {
-      const procedureData = { ...data };
-      delete procedureData.typeIds;
-      delete (procedureData as any).updatedAt;
+    const procedureData: any = { ...data };
+    delete procedureData.typeIds;
+    delete procedureData.updatedAt;
 
-      const [procedure] = await tx
-        .update(procedures)
-        .set(procedureData as any)
-        .where(eq(procedures.id, id))
-        .returning();
+    const [procedure] = await this.db
+      .update(procedures)
+      .set(procedureData)
+      .where(eq(procedures.id, id))
+      .returning();
 
-      if (data.typeIds !== undefined) {
-        // Delete all existing mappings
-        await tx.delete(procedureTypeMappings).where(eq(procedureTypeMappings.procedureId, id));
-        
-        // Insert new mappings if any
-        if (data.typeIds.length > 0) {
-          await tx.insert(procedureTypeMappings).values(
-            data.typeIds.map(typeId => ({
-              procedureId: id,
-              typeId,
-            }))
-          );
-        }
+    if (!procedure) return null;
+
+    if (data.typeIds !== undefined) {
+      await this.db.delete(procedureTypeMappings).where(eq(procedureTypeMappings.procedureId, id));
+
+      if (data.typeIds.length > 0) {
+        await this.db.insert(procedureTypeMappings).values(
+          data.typeIds.map(typeId => ({
+            procedureId: id,
+            typeId,
+          }))
+        );
       }
+    }
 
-      return procedure;
-    });
+    return procedure;
   }
 
   async deleteProcedure(id: string) {
-    return await this.db
+    const [procedure] = await this.db
       .delete(procedures)
       .where(eq(procedures.id, id))
       .returning();
+
+    return procedure ?? null;
+  }
+
+  /**
+   * Counts the rows that reference this procedure and would be destroyed or detached by a
+   * delete. `procedure_type_mappings` is intentionally not counted — those rows belong to the
+   * procedure and cascade with it.
+   */
+  async countProcedureReferences(id: string): Promise<ProcedureReferenceCounts> {
+    const toNumber = (rows: { count: unknown }[]) => Number(rows[0]?.count ?? 0);
+
+    const [feeRows, assignmentRows] = await Promise.all([
+      this.db.select({ count: count() }).from(doctorProcedureFees).where(eq(doctorProcedureFees.procedureId, id)),
+      this.db.select({ count: count() }).from(assignments).where(eq(assignments.procedureId, id)),
+    ]);
+
+    return {
+      doctorProcedureFees: toNumber(feeRows),
+      assignments: toNumber(assignmentRows),
+    };
   }
 
   // --- Categories ---
 
-  async findCategories(specialtyId?: string) {
-    const whereClause = specialtyId ? eq(procedureCategories.specialtyId, specialtyId) : undefined;
+  async findCategories(specialtyId?: string, search?: string) {
+    const conditions = [];
+    if (specialtyId) conditions.push(eq(procedureCategories.specialtyId, specialtyId));
+    if (search) conditions.push(ilike(procedureCategories.name, `%${search}%`));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
     return await this.db
       .select()
       .from(procedureCategories)
@@ -157,8 +211,37 @@ export class ProceduresRepository {
       .orderBy(asc(procedureCategories.name));
   }
 
+  async findCategoryById(id: string) {
+    const result = await this.db
+      .select()
+      .from(procedureCategories)
+      .where(eq(procedureCategories.id, id))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findCategoryByNameInsensitive(name: string, specialtyId: string, excludeId?: string) {
+    const conditions = [
+      eq(procedureCategories.specialtyId, specialtyId),
+      sql`lower(${procedureCategories.name}) = ${name.trim().toLowerCase()}`,
+    ];
+
+    if (excludeId) {
+      conditions.push(sql`${procedureCategories.id} <> ${excludeId}`);
+    }
+
+    const result = await this.db
+      .select()
+      .from(procedureCategories)
+      .where(and(...conditions))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
   async createCategory(data: CreateCategoryData) {
-    return await this.db
+    const [category] = await this.db
       .insert(procedureCategories)
       .values({
         specialtyId: data.specialtyId,
@@ -166,21 +249,37 @@ export class ProceduresRepository {
         description: data.description || null,
       })
       .returning();
+
+    return category ?? null;
   }
 
   async updateCategory(id: string, data: Partial<CreateCategoryData>) {
-    return await this.db
+    const [category] = await this.db
       .update(procedureCategories)
       .set(data)
       .where(eq(procedureCategories.id, id))
       .returning();
+
+    return category ?? null;
   }
 
   async deleteCategory(id: string) {
-    return await this.db
+    const [category] = await this.db
       .delete(procedureCategories)
       .where(eq(procedureCategories.id, id))
       .returning();
+
+    return category ?? null;
+  }
+
+  /** Procedures that would lose their category_id if this category were deleted. */
+  async countCategoryReferences(id: string): Promise<CategoryReferenceCounts> {
+    const rows = await this.db
+      .select({ count: count() })
+      .from(procedures)
+      .where(eq(procedures.categoryId, id));
+
+    return { procedures: Number(rows[0]?.count ?? 0) };
   }
 
   // --- Procedure Types ---
@@ -207,27 +306,33 @@ export class ProceduresRepository {
   }
 
   async createProcedureType(data: CreateProcedureTypeData) {
-    return await this.db
+    const [procedureType] = await this.db
       .insert(procedureTypes)
       .values({
         name: data.name,
         displayName: data.displayName,
       })
       .returning();
+
+    return procedureType ?? null;
   }
 
   async updateProcedureType(id: string, data: Partial<CreateProcedureTypeData>) {
-    return await this.db
+    const [procedureType] = await this.db
       .update(procedureTypes)
       .set(data)
       .where(eq(procedureTypes.id, id))
       .returning();
+
+    return procedureType ?? null;
   }
 
   async deleteProcedureType(id: string) {
-    return await this.db
+    const [procedureType] = await this.db
       .delete(procedureTypes)
       .where(eq(procedureTypes.id, id))
       .returning();
+
+    return procedureType ?? null;
   }
 }

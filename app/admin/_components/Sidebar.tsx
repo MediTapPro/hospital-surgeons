@@ -14,7 +14,6 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Headphones,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -96,8 +95,7 @@ export function Sidebar() {
     { id: "schedule-updates", label: "Schedule Updates", icon: Calendar, href: "/admin/schedule-updates" },
     { id: "vacation-updates", label: "Vacation Updates", icon: CalendarX, href: "/admin/vacation-updates" },
     { id: "audit-logs", label: "Audit Logs", icon: FileText, href: "/admin/audit-logs" },
-    { id: "settings", label: "Settings", icon: Settings, href: "/admin/settings" },
-    { id: "support", label: "Support", icon: Headphones, href: "/admin/support" },
+    { id: "settings", label: "Assignment Settings", icon: Settings, href: "/admin/settings" },
   ];
 
   const isActive = (href?: string) => {
@@ -111,7 +109,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "bg-slate-900 text-slate-100 transition-all duration-300 flex flex-col",
+        "sticky top-0 h-screen shrink-0 bg-slate-900 text-slate-100 transition-all duration-300 flex flex-col",
         collapsed ? "w-16" : "w-64",
       )}
     >
@@ -198,7 +196,4 @@ export function Sidebar() {
     </aside>
   );
 }
-
-
-
 

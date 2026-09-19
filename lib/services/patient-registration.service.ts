@@ -2,6 +2,7 @@ import { getDb } from '@/lib/db';
 import { UsersRepository } from '@/lib/repositories/users.repository';
 import { PatientProfilesRepository } from '@/lib/repositories/patient-profiles.repository';
 import { PatientSignupDto } from '@/lib/validations/patient-profile.dto';
+import { PATIENT_REGISTRATION_ACCOUNT_STATUS } from '@/lib/enums/users.enums';
 import bcrypt from 'bcrypt';
 
 export class PatientRegistrationService {
@@ -31,6 +32,7 @@ export class PatientRegistrationService {
         email: body.email,
         password_hash: passwordHash,
         phone: body.phone,
+        status: PATIENT_REGISTRATION_ACCOUNT_STATUS,
       }, 'patient');
       createdUser = user;
 
@@ -59,6 +61,7 @@ export class PatientRegistrationService {
         email: createdUser.email,
         phone: createdUser.phone,
         role: createdUser.role,
+        status: createdUser.status,
         createdAt: createdUser.createdAt,
       },
       profile: createdProfile,

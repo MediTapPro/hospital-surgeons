@@ -1,113 +1,49 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { hospitals, users } from '@/src/db/drizzle/migrations/schema';
-import { eq } from 'drizzle-orm';
-import { validateRequest } from '@/lib/utils/validate-request';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { ProviderVerificationsService } from '@/lib/services/provider-verifications.service';
 import { VerifyDtoSchema } from '@/lib/validations/verification.dto';
-import { createAuditLog, getRequestMetadata } from '@/lib/utils/audit-logger';
+import { validateRequest } from '@/lib/utils/validate-request';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const db = getDb();
-    const { id } = await params;
-    const hospitalId = id;
-    
-    // Validate request body with Zod schema
-    const validation = await validateRequest(req, VerifyDtoSchema);
-    if (!validation.success) {
-      return validation.response;
-    }
+/**
+ * @swagger
+ * /api/admin/verifications/hospitals/{id}/verify:
+ *   put:
+ *     summary: Verify a hospital registration (Admin only)
+ *     description: Verifies the hospital licence, writes the audit event, and activates the linked user only when the account is currently pending. Suspended or inactive accounts remain unchanged.
+ *     tags: [Admin Verifications]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema: { type: object, properties: { notes: { type: string } } }
+ *     responses:
+ *       200: { description: Hospital verified }
+ *       400: { description: Invalid request }
+ *       403: { description: Admin access required }
+ *       404: { description: Hospital not found }
+ */
+async function putHandler(req: AuthenticatedRequest, context: { params: Promise<{ id: string }> }) {
+  const validation = await validateRequest(req, VerifyDtoSchema);
+  if (!validation.success) return validation.response;
 
-    const { notes } = validation.data;
+  const { id } = await context.params;
+  const result = await new ProviderVerificationsService().updateProviderVerification({
+    providerType: 'hospital', providerId: id, verificationStatus: 'verified', adminUserId: req.user!.userId,
+    notes: validation.data.notes, requestMetadata: getRequestMetadata(req),
+  });
 
-    // Check if hospital exists with user info
-    const existingHospital = await db
-      .select({
-        id: hospitals.id,
-        userId: hospitals.userId,
-        name: hospitals.name,
-        registrationNumber: hospitals.registrationNumber,
-        licenseVerificationStatus: hospitals.licenseVerificationStatus,
-        userEmail: users.email,
-      })
-      .from(hospitals)
-      .leftJoin(users, eq(hospitals.userId, users.id))
-      .where(eq(hospitals.id, hospitalId))
-      .limit(1);
-
-    if (existingHospital.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'Hospital not found' },
-        { status: 404 }
-      );
-    }
-
-    const hospital = existingHospital[0];
-    const previousStatus = hospital.licenseVerificationStatus;
-
-    // Update hospital verification status
-    const [updatedHospital] = await db
-      .update(hospitals)
-      .set({
-        licenseVerificationStatus: 'verified',
-      })
-      .where(eq(hospitals.id, hospitalId))
-      .returning();
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'verify',
-      entityType: 'hospital',
-      entityId: hospitalId,
-      entityName: hospital.name,
-      httpMethod: 'PUT',
-      endpoint: `/api/admin/verifications/hospitals/${hospitalId}/verify`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      previousStatus: previousStatus,
-      newStatus: 'verified',
-      changes: {
-        licenseVerificationStatus: {
-          old: previousStatus,
-          new: 'verified',
-        },
-      },
-      notes: notes || 'Hospital verified by admin',
-      details: {
-        hospitalEmail: hospital.userEmail || undefined,
-        registrationNumber: hospital.registrationNumber || undefined,
-        verifiedAt: new Date().toISOString(),
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'Hospital verified successfully',
-      data: {
-        id: updatedHospital.id,
-        licenseVerificationStatus: updatedHospital.licenseVerificationStatus,
-      },
-    });
-  } catch (error) {
-    console.error('Error verifying hospital:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to verify hospital',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+  if (!result.success) {
+    return NextResponse.json({ success: false, message: result.code === 'NOT_FOUND' ? 'Hospital not found' : 'Failed to verify hospital' }, { status: result.code === 'NOT_FOUND' ? 404 : 500 });
   }
+
+  return NextResponse.json({ success: true, message: 'Hospital verified successfully', data: { id: result.data.id, licenseVerificationStatus: result.data.verificationStatus, accountStatus: result.data.accountStatus } });
 }
 
-
+export const PUT = withAuthAndContext(putHandler, ['admin']);

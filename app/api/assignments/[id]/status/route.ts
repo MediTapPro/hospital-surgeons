@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 import { UpdateAssignmentStatusDtoSchema } from '@/lib/validations/assignment-status.dto';
 import { validateRequest } from '@/lib/utils/validate-request';
+import { HomeVisitSettingsService } from '@/lib/services/home-visit-settings.service';
 
 /**
  * @swagger
@@ -163,10 +164,13 @@ async function patchHandler(
       );
     }
 
-    const allowEarlyCompletionForTesting = process.env.NODE_ENV !== 'production';
-
     // Only allow 'completed' status if current time is after the scheduled start time
-    if (status === 'completed' && assignmentData.availabilitySlotId && !allowEarlyCompletionForTesting) {
+    if (status === 'completed' && assignmentData.availabilitySlotId) {
+      const completionSettings = await new HomeVisitSettingsService().getSettings();
+      const allowEarlyAssignmentCompletion = completionSettings.success
+        && completionSettings.data?.allowEarlyAssignmentCompletion === true;
+
+      if (!allowEarlyAssignmentCompletion) {
       const slotInfo = await db
         .select({
           slotDate: doctorAvailability.slotDate,
@@ -204,6 +208,7 @@ async function patchHandler(
             { status: 400 }
           );
         }
+      }
       }
     }
 

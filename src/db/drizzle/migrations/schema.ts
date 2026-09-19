@@ -1654,6 +1654,7 @@ export const platformHomeVisitSettings = pgTable("platform_home_visit_settings",
 	freeTrialVisitLimit: integer("free_trial_visit_limit").default(1).notNull(),
 	freeTrialActiveBookingLimit: integer("free_trial_active_booking_limit").default(1).notNull(),
 	paidPaymentTiming: text("paid_payment_timing").default('pay_after_completion').notNull(),
+	allowEarlyAssignmentCompletion: boolean("allow_early_assignment_completion").default(false).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [

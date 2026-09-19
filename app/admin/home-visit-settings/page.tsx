@@ -21,6 +21,7 @@ interface HomeVisitSettings {
   freeTrialVisitLimit: number;
   freeTrialActiveBookingLimit: number;
   paidPaymentTiming: HomeVisitPaymentTiming;
+  allowEarlyAssignmentCompletion: boolean;
 }
 
 const DEFAULT_SETTINGS: HomeVisitSettings = {
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: HomeVisitSettings = {
   freeTrialVisitLimit: 1,
   freeTrialActiveBookingLimit: 1,
   paidPaymentTiming: 'pay_after_completion',
+  allowEarlyAssignmentCompletion: false,
 };
 
 function SettingsToggle({
@@ -91,6 +93,7 @@ export default function HomeVisitSettingsPage() {
             freeTrialVisitLimit: data.freeTrialVisitLimit,
             freeTrialActiveBookingLimit: data.freeTrialActiveBookingLimit,
             paidPaymentTiming: data.paidPaymentTiming,
+            allowEarlyAssignmentCompletion: data.allowEarlyAssignmentCompletion,
           });
           return;
         }
@@ -259,9 +262,28 @@ export default function HomeVisitSettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader className="flex-row gap-3 space-y-0">
+            <div className="rounded-lg bg-sky-50 p-2.5 text-sky-700"><ShieldCheck className="size-5" /></div>
+            <div>
+              <CardTitle className="text-lg text-slate-900">Assignment completion</CardTitle>
+              <CardDescription>Control whether a doctor may complete an assignment before its scheduled start time.</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <SettingsToggle
+              id="allow-early-assignment-completion"
+              label="Allow early assignment completion"
+              description="When enabled, doctors may complete hospital assignments and patient home visits before their scheduled start time."
+              checked={settings.allowEarlyAssignmentCompletion}
+              onCheckedChange={(allowEarlyAssignmentCompletion) => updateSettings({ allowEarlyAssignmentCompletion })}
+            />
+          </CardContent>
+        </Card>
+
         <div className="flex items-start gap-3 rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950">
           <ShieldCheck className="mt-0.5 size-5 shrink-0 text-teal-700" />
-          <p>Changes apply to new bookings only. Every booking stores its payment mode when it is created, so existing visits keep their original rule.</p>
+          <p>Home-visit availability and payment policy changes apply to new bookings only. The assignment-completion setting applies immediately to hospital assignments and home visits.</p>
         </div>
       </div>
     </main>

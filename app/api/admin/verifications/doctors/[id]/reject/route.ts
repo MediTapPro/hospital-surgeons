@@ -1,117 +1,49 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { doctors, users } from '@/src/db/drizzle/migrations/schema';
-import { eq } from 'drizzle-orm';
-import { validateRequest } from '@/lib/utils/validate-request';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { ProviderVerificationsService } from '@/lib/services/provider-verifications.service';
 import { RejectDtoSchema } from '@/lib/validations/verification.dto';
-import { createAuditLog, getRequestMetadata } from '@/lib/utils/audit-logger';
+import { validateRequest } from '@/lib/utils/validate-request';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const db = getDb();
-    const { id } = await params;
-    const doctorId = id;
-    
-    // Validate request body with Zod schema
-    const validation = await validateRequest(req, RejectDtoSchema);
-    if (!validation.success) {
-      return validation.response;
-    }
+/**
+ * @swagger
+ * /api/admin/verifications/doctors/{id}/reject:
+ *   put:
+ *     summary: Reject a doctor's licence (Admin only)
+ *     description: Updates doctors.license_verification_status to rejected and stores the required reason in the atomic audit event. It does not change users.status.
+ *     tags: [Admin Verifications]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [reason], properties: { reason: { type: string }, notes: { type: string } } }
+ *     responses:
+ *       200: { description: Doctor verification rejected }
+ *       400: { description: Rejection reason is required }
+ *       403: { description: Admin access required }
+ *       404: { description: Doctor not found }
+ */
+async function putHandler(req: AuthenticatedRequest, context: { params: Promise<{ id: string }> }) {
+  const validation = await validateRequest(req, RejectDtoSchema);
+  if (!validation.success) return validation.response;
 
-    const { reason, notes } = validation.data;
+  const { id } = await context.params;
+  const result = await new ProviderVerificationsService().updateProviderVerification({
+    providerType: 'doctor', providerId: id, verificationStatus: 'rejected', adminUserId: req.user!.userId,
+    reason: validation.data.reason, notes: validation.data.notes, requestMetadata: getRequestMetadata(req),
+  });
 
-    // Check if doctor exists with user info
-    const existingDoctor = await db
-      .select({
-        id: doctors.id,
-        userId: doctors.userId,
-        firstName: doctors.firstName,
-        lastName: doctors.lastName,
-        medicalLicenseNumber: doctors.medicalLicenseNumber,
-        licenseVerificationStatus: doctors.licenseVerificationStatus,
-        userEmail: users.email,
-      })
-      .from(doctors)
-      .leftJoin(users, eq(doctors.userId, users.id))
-      .where(eq(doctors.id, doctorId))
-      .limit(1);
-
-    if (existingDoctor.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'Doctor not found' },
-        { status: 404 }
-      );
-    }
-
-    const doctor = existingDoctor[0];
-    const doctorName = `Dr. ${doctor.firstName} ${doctor.lastName}`;
-    const previousStatus = doctor.licenseVerificationStatus;
-
-    // Update doctor verification status
-    const [updatedDoctor] = await db
-      .update(doctors)
-      .set({
-        licenseVerificationStatus: 'rejected',
-      })
-      .where(eq(doctors.id, doctorId))
-      .returning();
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'reject',
-      entityType: 'doctor',
-      entityId: doctorId,
-      entityName: doctorName,
-      httpMethod: 'PUT',
-      endpoint: `/api/admin/verifications/doctors/${doctorId}/reject`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      previousStatus: previousStatus,
-      newStatus: 'rejected',
-      changes: {
-        licenseVerificationStatus: {
-          old: previousStatus,
-          new: 'rejected',
-        },
-      },
-      reason: reason,
-      notes: notes || undefined,
-      details: {
-        doctorEmail: doctor.userEmail || undefined,
-        medicalLicenseNumber: doctor.medicalLicenseNumber || undefined,
-        rejectedAt: new Date().toISOString(),
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'Doctor verification rejected',
-      data: {
-        id: updatedDoctor.id,
-        licenseVerificationStatus: updatedDoctor.licenseVerificationStatus,
-        reason: reason,
-      },
-    });
-  } catch (error) {
-    console.error('Error rejecting doctor verification:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to reject doctor verification',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+  if (!result.success) {
+    return NextResponse.json({ success: false, message: result.code === 'NOT_FOUND' ? 'Doctor not found' : 'Failed to reject doctor' }, { status: result.code === 'NOT_FOUND' ? 404 : 500 });
   }
+
+  return NextResponse.json({ success: true, message: 'Doctor verification rejected', data: { id: result.data.id, licenseVerificationStatus: result.data.verificationStatus, reason: validation.data.reason } });
 }
 
-
+export const PUT = withAuthAndContext(putHandler, ['admin']);

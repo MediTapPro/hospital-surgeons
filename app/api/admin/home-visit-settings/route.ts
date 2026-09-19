@@ -8,11 +8,12 @@ const settingsService = new HomeVisitSettingsService();
  * @swagger
  * /api/admin/home-visit-settings:
  *   get:
- *     summary: Get global home-visit settings
+ *     summary: Get global home-visit and assignment-completion settings
  *     tags: [Admin Home Visits]
  *     security: [{ bearerAuth: [] }]
  *   put:
- *     summary: Update global home-visit settings
+ *     summary: Update global home-visit and assignment-completion settings
+ *     description: Allow early assignment completion applies to both hospital assignments and patient home visits.
  *     tags: [Admin Home Visits]
  *     security: [{ bearerAuth: [] }]
  *     responses:

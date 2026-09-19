@@ -125,6 +125,8 @@ export class UsersService {
         }
       }
 
+      await this.userRepository.recordSuccessfulLogin(user[0].id);
+
       const payload = { userId: user[0].id, userRole: user[0].role };
       const accessToken = signToken(
         payload,

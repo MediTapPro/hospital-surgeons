@@ -4,13 +4,15 @@ import { useState, useEffect } from 'react';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Search, Eye, Check, X, MessageSquare, Download, ZoomIn, ZoomOut, Loader2 } from 'lucide-react';
+import { Search, Eye, Check, X, Download, ZoomIn, ZoomOut, Loader2 } from 'lucide-react';
 import { StatusBadge } from '../StatusBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface Doctor {
   id: string;
@@ -98,8 +100,8 @@ export function DoctorVerifications() {
         params.append('search', searchQuery);
       }
 
-      const response = await fetch(`/api/admin/verifications/doctors?${params.toString()}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/verifications/doctors?${params.toString()}`);
+      const data = response.data;
 
       if (data.success) {
         setDoctors(data.data);
@@ -118,8 +120,8 @@ export function DoctorVerifications() {
   const fetchDoctorDetail = async (doctorId: string) => {
     try {
       setLoadingDetail(true);
-      const response = await fetch(`/api/admin/verifications/doctors/${doctorId}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/verifications/doctors/${doctorId}`);
+      const data = response.data;
 
       if (data.success) {
         setSelectedDoctor(data.data);
@@ -139,13 +141,8 @@ export function DoctorVerifications() {
 
     try {
       setUpdating(selectedDoctor.id);
-      const response = await fetch(`/api/admin/verifications/doctors/${selectedDoctor.id}/verify`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/verifications/doctors/${selectedDoctor.id}/verify`, { notes });
+      const data = response.data;
 
       if (data.success) {
         toast.success('Doctor verified successfully');
@@ -171,13 +168,8 @@ export function DoctorVerifications() {
 
     try {
       setUpdating(selectedDoctor.id);
-      const response = await fetch(`/api/admin/verifications/doctors/${selectedDoctor.id}/reject`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: rejectReason, notes }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/verifications/doctors/${selectedDoctor.id}/reject`, { reason: rejectReason, notes });
+      const data = response.data;
 
       if (data.success) {
         toast.success('Doctor verification rejected');
@@ -206,16 +198,11 @@ export function DoctorVerifications() {
 
     try {
       setCredentialActionId(`${credentialId}-${status}`);
-      const response = await fetch(`/api/admin/doctor-credentials/${credentialId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          verificationStatus: status,
-          notes: reason || notes || (status === 'verified' ? 'Credential verified by admin' : undefined),
-        }),
+      const response = await apiClient.put(`/api/admin/doctor-credentials/${credentialId}`, {
+        verificationStatus: status,
+        notes: reason || notes || (status === 'verified' ? 'Credential verified by admin' : undefined),
       });
-
-      const data = await response.json();
+      const data = response.data;
 
       if (data.success) {
         toast.success(`Credential ${status === 'verified' ? 'approved' : 'rejected'}`);
@@ -250,14 +237,46 @@ export function DoctorVerifications() {
     });
   };
 
+  const tableColumns: AdminDataTableColumn<Doctor>[] = [
+    {
+      id: 'doctor', label: 'Doctor', widthClassName: 'w-[210px]',
+      cell: (doctor) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-100 font-semibold text-teal-700">
+            {doctor.firstName.charAt(0)}{doctor.lastName.charAt(0)}
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-slate-900">{doctor.name}</p>
+            <p className="truncate text-sm text-slate-500">{doctor.primaryLocation || 'N/A'}</p>
+          </div>
+        </div>
+      ),
+    },
+    { id: 'email', label: 'Email', widthClassName: 'w-[270px]', cellClassName: 'text-slate-600', cell: (doctor) => doctor.email },
+    { id: 'license', label: 'License number', widthClassName: 'w-[155px]', cellClassName: 'whitespace-nowrap font-medium text-slate-900', cell: (doctor) => doctor.medicalLicenseNumber },
+    { id: 'experience', label: 'Experience', widthClassName: 'w-[135px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (doctor) => `${doctor.yearsOfExperience} years` },
+    { id: 'credentials', label: 'Credentials', widthClassName: 'w-[165px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (doctor) => `${doctor.credentialsCount} (${doctor.pendingCredentialsCount} pending)` },
+    { id: 'submitted', label: 'Submitted', widthClassName: 'w-[145px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (doctor) => formatDate(doctor.createdAt) },
+    { id: 'status', label: 'Status', widthClassName: 'w-[125px]', cell: (doctor) => <StatusBadge status={doctor.licenseVerificationStatus} /> },
+    {
+      id: 'actions', label: 'Actions', widthClassName: 'w-[135px]', sticky: 'right',
+      cell: (doctor) => (
+        <Button size="sm" variant="ghost" onClick={() => fetchDoctorDetail(doctor.id)} disabled={loadingDetail} className="w-full justify-center whitespace-nowrap">
+          <Eye className="mr-1 h-4 w-4" />
+          Review
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-full bg-slate-50">
       <PageHeader 
         title="Doctor Verifications" 
         description="Review and verify doctor registration applications"
       />
 
-      <div className="p-8">
+      <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
         <Tabs 
           value={activeTab} 
           onValueChange={(value) => {
@@ -266,17 +285,16 @@ export function DoctorVerifications() {
           }} 
           className="space-y-6"
         >
-          <TabsList>
+          <TabsList className="h-11 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             <TabsTrigger value="pending">Pending</TabsTrigger>
             <TabsTrigger value="approved">Approved</TabsTrigger>
             <TabsTrigger value="rejected">Rejected</TabsTrigger>
           </TabsList>
 
           <TabsContent value={activeTab} className="space-y-4">
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b border-slate-200">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1 relative">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                <div className="relative max-w-2xl">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                     <Input
                       placeholder="Search by name, email, or license number..."
@@ -285,10 +303,9 @@ export function DoctorVerifications() {
                         setSearchQuery(e.target.value);
                         setPage(1);
                       }}
-                      className="pl-10"
+                      className="h-11 border-slate-300 bg-white pl-10 shadow-sm"
                     />
                   </div>
-                </div>
               </div>
 
               {loading ? (
@@ -298,71 +315,16 @@ export function DoctorVerifications() {
                 </div>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-slate-600">Doctor</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Email</th>
-                          <th className="px-6 py-3 text-left text-slate-600">License Number</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Experience</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Credentials</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Submitted</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200">
-                        {doctors.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
-                              No doctors found
-                            </td>
-                          </tr>
-                        ) : (
-                          doctors.map((doctor) => (
-                            <tr key={doctor.id} className="hover:bg-slate-50">
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-semibold">
-                                    {doctor.firstName.charAt(0)}{doctor.lastName.charAt(0)}
-                                  </div>
-                                  <div>
-                                    <div className="text-slate-900">{doctor.name}</div>
-                                    <div className="text-slate-500 text-sm">{doctor.primaryLocation || 'N/A'}</div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-slate-600 text-sm">{doctor.email}</td>
-                              <td className="px-6 py-4 text-slate-900 text-sm">{doctor.medicalLicenseNumber}</td>
-                              <td className="px-6 py-4 text-slate-600">{doctor.yearsOfExperience} years</td>
-                              <td className="px-6 py-4 text-slate-600">
-                                {doctor.credentialsCount} ({doctor.pendingCredentialsCount} pending)
-                              </td>
-                              <td className="px-6 py-4 text-slate-600 text-sm">{formatDate(doctor.createdAt)}</td>
-                              <td className="px-6 py-4">
-                                <StatusBadge status={doctor.licenseVerificationStatus} />
-                              </td>
-                              <td className="px-6 py-4">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => fetchDoctorDetail(doctor.id)}
-                                  disabled={loadingDetail}
-                                >
-                                  <Eye className="w-4 h-4 mr-1" />
-                                  Review
-                                </Button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  <AdminDataTable
+                    columns={tableColumns}
+                    data={doctors}
+                    emptyMessage="No doctors found"
+                    getRowKey={(doctor) => doctor.id}
+                    minWidthClassName="min-w-[1340px]"
+                  />
 
                   {totalPages > 1 && (
-                    <div className="p-4 border-t border-slate-200 flex items-center justify-between">
+                    <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-sm text-slate-600">
                         Page {page} of {totalPages}
                       </div>
@@ -395,22 +357,22 @@ export function DoctorVerifications() {
 
       {/* Verification Detail Modal */}
       <Dialog open={!!selectedDoctor} onOpenChange={() => setSelectedDoctor(null)}>
-        <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col bg-white dark:bg-gray-900 p-0">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-200 flex-shrink-0">
+        <DialogContent size="wide" className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-6">
             <DialogTitle>Doctor Verification Review</DialogTitle>
             <DialogDescription>
               Review doctor credentials and documents before verification
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0 overflow-x-hidden">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
             {loadingDetail ? (
               <div className="p-8 text-center">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto text-teal-600 mb-4" />
                 <p className="text-slate-600">Loading doctor details...</p>
               </div>
             ) : selectedDoctor ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               {/* Left Panel - Profile */}
               <div className="space-y-6 min-w-0">
                 <div className="bg-slate-50 rounded-lg p-6">
@@ -482,7 +444,7 @@ export function DoctorVerifications() {
                   <label className="text-sm font-medium text-slate-600 mb-2 block">Credentials & Documents</label>
                   <div className="space-y-2 max-h-96 overflow-y-auto overflow-x-hidden">
                     {selectedDoctor.credentials.length === 0 ? (
-                      <p className="text-slate-500 text-center py-8">No credentials uploaded</p>
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-slate-500">No credentials uploaded</div>
                     ) : (
                       selectedDoctor.credentials.map((cred) => (
                         <div key={cred.id} className="p-3 bg-slate-50 rounded-lg">
@@ -595,15 +557,7 @@ export function DoctorVerifications() {
             ) : null}
           </div>
 
-          <DialogFooter className="flex items-center justify-between border-t border-gray-200 px-6 py-4 flex-shrink-0 bg-gray-50">
-            <Button
-              variant="outline"
-              onClick={() => setSelectedDoctor(null)}
-              className="border-amber-600 text-amber-600 hover:bg-amber-50"
-            >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Request Info
-            </Button>
+          <DialogFooter className="shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row">
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"

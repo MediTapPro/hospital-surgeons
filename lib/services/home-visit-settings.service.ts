@@ -13,6 +13,7 @@ const DEFAULT_HOME_VISIT_SETTINGS: HomeVisitSettingsValues = {
   freeTrialVisitLimit: 1,
   freeTrialActiveBookingLimit: 1,
   paidPaymentTiming: 'pay_after_completion',
+  allowEarlyAssignmentCompletion: false,
 };
 
 const paymentTimings = new Set<string>(
@@ -35,6 +36,7 @@ export class HomeVisitSettingsService {
                   freeTrialVisitLimit: settings.freeTrialVisitLimit,
                   freeTrialActiveBookingLimit: settings.freeTrialActiveBookingLimit,
                   paidPaymentTiming: DEFAULT_HOME_VISIT_SETTINGS.paidPaymentTiming,
+                  allowEarlyAssignmentCompletion: settings.allowEarlyAssignmentCompletion,
                 }
               : DEFAULT_HOME_VISIT_SETTINGS,
             tx
@@ -54,10 +56,14 @@ export class HomeVisitSettingsService {
   }
 
   async updateSettings(values: HomeVisitSettingsValues) {
-    if (typeof values.homeVisitEnabled !== 'boolean' || typeof values.freeTrialEnabled !== 'boolean') {
+    if (
+      typeof values.homeVisitEnabled !== 'boolean'
+      || typeof values.freeTrialEnabled !== 'boolean'
+      || typeof values.allowEarlyAssignmentCompletion !== 'boolean'
+    ) {
       return {
         success: false,
-        message: 'Home visit and free trial settings must be true or false.',
+        message: 'Boolean platform settings must be true or false.',
       };
     }
 

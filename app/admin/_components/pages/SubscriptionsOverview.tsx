@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { StatusBadge } from '../StatusBadge';
 import { Button } from '../ui/button';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
 
 interface Subscription {
   id: string;
@@ -46,8 +47,7 @@ export function SubscriptionsOverview() {
       params.append('limit', limit.toString());
       params.append('page', page.toString());
 
-      const res = await fetch(`/api/admin/subscriptions?${params.toString()}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/subscriptions?${params.toString()}`);
 
       if (data.success) {
         setSubscriptions(data.data || []);
@@ -66,8 +66,7 @@ export function SubscriptionsOverview() {
   const fetchExpiring = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admin/subscriptions/expiring?days=30');
-      const data = await res.json();
+      const { data } = await apiClient.get('/api/admin/subscriptions/expiring?days=30');
 
       if (data.success) {
         setExpiringSubscriptions(data.data || []);

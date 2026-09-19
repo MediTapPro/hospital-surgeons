@@ -31,7 +31,7 @@ export class AdminDashboardService {
         const hospitalName = row.hospital_name || 'Unknown Hospital';
 
         activities.push({
-          id: row.id,
+          id: `verification-${row.id}`,
           type: 'verification',
           message: row.action === 'verify'
             ? `${row.entity_type === 'doctor' ? 'Dr. ' + doctorName : hospitalName} verified`
@@ -39,7 +39,8 @@ export class AdminDashboardService {
             ? `${row.entity_type === 'doctor' ? 'Dr. ' + doctorName : hospitalName} verification rejected`
             : `${row.entity_type === 'doctor' ? 'Dr. ' + doctorName : hospitalName} verification requested`,
           time: formatTimeAgo(new Date(row.created_at)),
-          status: row.action === 'verify' ? 'success' : row.action === 'reject' ? 'rejected' : 'pending',
+          createdAt: row.created_at,
+          status: row.action === 'verify' ? 'verified' : row.action === 'reject' ? 'rejected' : 'pending',
           entityType: row.entity_type,
           entityId: row.entity_id,
         });
@@ -47,16 +48,24 @@ export class AdminDashboardService {
 
       // Format assignment activities
       raw.assignments.forEach((assignment) => {
+        const doctorName = [assignment.doctorFirstName, assignment.doctorLastName]
+          .filter(Boolean)
+          .join(' ') || 'an assigned doctor';
+        const assignmentLabel = assignment.source === 'patient'
+          ? 'Home visit'
+          : `Assignment at ${assignment.hospitalName || 'hospital'}`;
+
         activities.push({
-          id: assignment.id,
+          id: `assignment-${assignment.id}`,
           type: 'assignment',
           message: assignment.status === 'completed'
-            ? `Assignment completed by Dr. ${assignment.doctorFirstName} ${assignment.doctorLastName} at ${assignment.hospitalName}`
+            ? `${assignmentLabel} completed by Dr. ${doctorName}`
             : assignment.status === 'pending'
-            ? `New assignment created: Dr. ${assignment.doctorFirstName} ${assignment.doctorLastName} at ${assignment.hospitalName}`
-            : `Assignment ${assignment.status} at ${assignment.hospitalName}`,
+            ? `New ${assignmentLabel.toLowerCase()} created for Dr. ${doctorName}`
+            : `${assignmentLabel} ${assignment.status}`,
           time: formatTimeAgo(new Date(assignment.requestedAt as string)),
-          status: assignment.status === 'completed' ? 'success' : assignment.priority === 'high' ? 'urgent' : 'pending',
+          createdAt: assignment.requestedAt,
+          status: assignment.status === 'completed' ? 'completed' : assignment.priority === 'high' ? 'urgent' : assignment.status,
           priority: assignment.priority,
         });
       });
@@ -64,10 +73,11 @@ export class AdminDashboardService {
       // Format registration activities
       raw.registrations.forEach((row: any) => {
         activities.push({
-          id: row.id,
+          id: `registration-${row.id}`,
           type: 'registration',
           message: `New ${row.role} registration: ${row.role === 'doctor' ? 'Dr. ' + row.doctor_name : row.hospital_name}`,
           time: formatTimeAgo(new Date(row.created_at)),
+          createdAt: row.created_at,
           status: 'pending',
           role: row.role,
         });
@@ -76,20 +86,16 @@ export class AdminDashboardService {
       // Format subscription activities
       raw.subscriptions.forEach((sub: any) => {
         activities.push({
-          id: sub.id,
+          id: `subscription-${sub.id}`,
           type: 'subscription',
           message: `${sub.status === 'active' ? 'Premium plan activated' : 'Subscription ' + sub.status} for ${sub.user_name}`,
-          time: formatTimeAgo(new Date(sub.start_date)),
-          status: sub.status === 'active' ? 'success' : 'pending',
+          time: formatTimeAgo(new Date(sub.created_at || sub.start_date)),
+          createdAt: sub.created_at || sub.start_date,
+          status: sub.status === 'active' ? 'active' : 'pending',
         });
       });
 
-      // Sort all activities by time (most recent first)
-      activities.sort((a, b) => {
-        const timeA = parseTimeAgo(a.time);
-        const timeB = parseTimeAgo(b.time);
-        return timeB - timeA;
-      });
+      activities.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       return {
         success: true,
@@ -247,35 +253,4 @@ function formatTimeAgo(date: Date): string {
 
   const diffInWeeks = Math.floor(diffInDays / 7);
   return `${diffInWeeks} week${diffInWeeks !== 1 ? 's' : ''} ago`;
-}
-
-function parseTimeAgo(timeStr: string): number {
-  const now = new Date().getTime();
-  const match = timeStr.match(/(\d+)\s*(sec|min|hour|day|week)s?\s*ago/);
-
-  if (!match) return now;
-
-  const value = parseInt(match[1]);
-  const unit = match[2];
-
-  let milliseconds = 0;
-  switch (unit) {
-    case 'sec':
-      milliseconds = value * 1000;
-      break;
-    case 'min':
-      milliseconds = value * 60 * 1000;
-      break;
-    case 'hour':
-      milliseconds = value * 60 * 60 * 1000;
-      break;
-    case 'day':
-      milliseconds = value * 24 * 60 * 60 * 1000;
-      break;
-    case 'week':
-      milliseconds = value * 7 * 24 * 60 * 60 * 1000;
-      break;
-  }
-
-  return now - milliseconds;
 }
