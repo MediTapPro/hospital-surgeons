@@ -301,6 +301,63 @@
         }
       }
     },
+    "/api/admin/dashboard/alerts": {
+      "get": {
+        "summary": "Get actionable admin dashboard alerts (Admin only)",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dashboard alerts retrieved successfully"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/dashboard/recent-activity": {
+      "get": {
+        "summary": "Get recent admin dashboard activity",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent activity retrieved successfully"
+          },
+          "400": {
+            "description": "Invalid limit value"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
     "/api/admin/dashboard/stats": {
       "get": {
         "summary": "Get admin dashboard statistics (Admin only)",
@@ -332,8 +389,17 @@
                         "activeHospitals": {
                           "type": "integer"
                         },
-                        "totalAssignments": {
+                        "todayAssignments": {
                           "type": "integer"
+                        },
+                        "homeVisitsToday": {
+                          "type": "integer"
+                        },
+                        "homeVisitPatientPaymentsCollected": {
+                          "type": "number"
+                        },
+                        "homeVisitPendingDoctorPayout": {
+                          "type": "number"
                         },
                         "activeSubscriptions": {
                           "type": "integer"
@@ -347,6 +413,894 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/admin/dashboard/trends": {
+      "get": {
+        "summary": "Get admin dashboard assignment and user growth trends",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "months",
+            "schema": {
+              "type": "integer",
+              "default": 6,
+              "minimum": 1,
+              "maximum": 24
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dashboard trends retrieved successfully"
+          },
+          "400": {
+            "description": "Invalid months value"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/doctor-credentials/{credentialId}": {
+      "put": {
+        "summary": "Update one doctor credential's verification status (Admin only)",
+        "description": "Updates doctor_credentials.verification_status and records the audit event in the same transaction. This does not update the doctor's overall licence status.",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "verificationStatus"
+                ],
+                "properties": {
+                  "verificationStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "verified",
+                      "rejected"
+                    ]
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credential updated"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Credential not found"
+          }
+        }
+      }
+    },
+    "/api/admin/home-visit-fees/{id}": {
+      "delete": {
+        "summary": "Delete a specialty-specific home-visit fee",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fee deleted"
+          },
+          "400": {
+            "description": "Fee cannot be deleted"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/home-visit-fees": {
+      "get": {
+        "summary": "List home-visit fees",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create or update a home-visit fee for a specialty",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fee saved"
+          },
+          "400": {
+            "description": "Invalid fee details"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/home-visit-settings": {
+      "get": {
+        "summary": "Get global home-visit and assignment-completion settings",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Update global home-visit and assignment-completion settings",
+        "description": "Allow early assignment completion applies to both hospital assignments and patient home visits.",
+        "tags": [
+          "Admin Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings saved"
+          },
+          "400": {
+            "description": "Invalid settings"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/payments/{id}/settle": {
+      "patch": {
+        "summary": "Mark a doctor settlement as paid",
+        "description": "Admin-only home-visit payout action. The patient payment must be paid and the doctor settlement pending. It records `paid_to_doctor_at` and changes settlement status to completed atomically. Hospital settlements keep their existing workflow.",
+        "tags": [
+          "Admin Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doctor settlement marked as paid"
+          },
+          "400": {
+            "description": "Record is not an eligible pending home-visit settlement",
+            "or patient payment is incomplete": null
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Settlement not found"
+          }
+        }
+      }
+    },
+    "/api/admin/payments": {
+      "get": {
+        "summary": "List assignment payment and settlement records",
+        "description": "Admin-only unified payment ledger for hospital assignments and paid home visits. Patient payment status and doctor settlement status are separate fields.",
+        "tags": [
+          "Admin Payments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital_assignment",
+                "home_visit"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment records retrieved successfully"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "500": {
+            "description": "Unable to load payment records"
+          }
+        }
+      }
+    },
+    "/api/admin/procedures/{id}": {
+      "get": {
+        "summary": "Get a procedure (Admin)",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Procedure details, including assigned procedure type IDs"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Procedure not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a procedure (Admin)",
+        "description": "Update a procedure. Supplying `typeIds` replaces the procedure's pricing-type mappings entirely.\n",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "specialtyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "categoryId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  },
+                  "typeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Procedure updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Procedure not found"
+          },
+          "409": {
+            "description": "A procedure with this name already exists for this specialty"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a procedure (Admin)",
+        "description": "Deletion is rejected while the procedure is referenced by a doctor procedure fee or an assignment. The procedure's own procedure type mappings cascade with it and are not treated as a blocking reference.\n",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Procedure deleted successfully"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Procedure not found"
+          },
+          "409": {
+            "description": "Cannot delete procedure as it is referenced by dependent records"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/admin/procedures/categories/{id}": {
+      "put": {
+        "summary": "Update a procedure category (Admin)",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "specialtyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category updated successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Category not found"
+          },
+          "409": {
+            "description": "A category with this name already exists for this specialty"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a procedure category (Admin)",
+        "description": "Deletion is rejected while any procedure is assigned to the category. The category relationship is ON DELETE SET NULL, so deleting would otherwise silently leave procedures uncategorised.\n",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category deleted successfully"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Category not found"
+          },
+          "409": {
+            "description": "Cannot delete category as procedures are still assigned to it"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/admin/procedures/categories": {
+      "get": {
+        "summary": "List procedure categories (Admin)",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "specialtyId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter by specialty"
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Case-insensitive search by category name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of procedure categories"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a procedure category (Admin)",
+        "description": "Category names are unique per specialty, compared case-insensitively.",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "specialtyId",
+                  "name"
+                ],
+                "properties": {
+                  "specialtyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Category created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "409": {
+            "description": "A category with this name already exists for this specialty"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/admin/procedures": {
+      "get": {
+        "summary": "List procedures (Admin)",
+        "description": "Retrieve medical procedures, optionally filtered by specialty, category, or name.",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "specialtyId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter by specialty"
+          },
+          {
+            "in": "query",
+            "name": "categoryId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter by procedure category"
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Case-insensitive search by procedure name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of procedures"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a procedure (Admin)",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "specialtyId",
+                  "name"
+                ],
+                "properties": {
+                  "specialtyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "categoryId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  },
+                  "typeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Procedure created successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "409": {
+            "description": "A procedure with this name already exists for this specialty"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/admin/procedures/types": {
+      "get": {
+        "summary": "List procedure types (Admin)",
+        "description": "Retrieve the pricing-option procedure types, optionally restricted to the types assigned to one procedure.",
+        "tags": [
+          "Admin",
+          "Procedures"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "procedureId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Only return the types mapped to this procedure"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of procedure types"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         }
       }
@@ -378,6 +1332,12 @@
         "responses": {
           "200": {
             "description": "Specialty details retrieved successfully"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
           },
           "404": {
             "description": "Specialty not found"
@@ -432,11 +1392,17 @@
           "200": {
             "description": "Specialty updated successfully"
           },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
           "404": {
             "description": "Specialty not found"
           },
           "409": {
-            "description": "Specialty name already in use"
+            "description": "A specialty with this name already exists (case-insensitive)"
           },
           "500": {
             "description": "Internal server error"
@@ -445,7 +1411,7 @@
       },
       "delete": {
         "summary": "Delete specialty (Admin)",
-        "description": "Remove a specialty if it is not currently associated with any doctors or hospitals.",
+        "description": "Remove a specialty. Deletion is rejected while the specialty is referenced by any doctor specialty, hospital department, procedure category, procedure, assignment, doctor procedure fee, or platform home-visit fee configuration. Six of those relationships cascade on delete, so this check prevents silently destroying referencing rows.\n",
         "tags": [
           "Admin",
           "Specialties"
@@ -470,11 +1436,17 @@
           "200": {
             "description": "Specialty deleted successfully"
           },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
           "404": {
             "description": "Specialty not found"
           },
           "409": {
-            "description": "Cannot delete specialty as it is currently in use"
+            "description": "Cannot delete specialty as it is currently referenced by dependent records"
           },
           "500": {
             "description": "Internal server error"
@@ -510,7 +1482,8 @@
             "name": "limit",
             "schema": {
               "type": "integer",
-              "default": 10
+              "default": 10,
+              "maximum": 100
             },
             "description": "Number of items per page"
           },
@@ -520,7 +1493,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Search by specialty name"
+            "description": "Case-insensitive search by specialty name"
           },
           {
             "in": "query",
@@ -580,9 +1553,6 @@
                           },
                           "activeHospitals": {
                             "type": "integer"
-                          },
-                          "status": {
-                            "type": "string"
                           }
                         }
                       }
@@ -608,6 +1578,15 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
           },
           "500": {
             "description": "Internal server error"
@@ -656,8 +1635,14 @@
           "400": {
             "description": "Validation error"
           },
+          "401": {
+            "description": "Authorization header missing or invalid token"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
           "409": {
-            "description": "Specialty already exists"
+            "description": "A specialty with this name already exists (case-insensitive)"
           },
           "500": {
             "description": "Internal server error"
@@ -665,9 +1650,272 @@
         }
       }
     },
+    "/api/admin/users/{id}/role": {
+      "put": {
+        "summary": "Update a user's role (Admin only)",
+        "description": "Updates the user role and audit event atomically. Existing admin accounts and the current admin's own role are protected.",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "doctor",
+                      "hospital",
+                      "admin"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User role updated"
+          },
+          "400": {
+            "description": "Invalid role"
+          },
+          "403": {
+            "description": "Admin access required or protected account"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/admin/users/{id}": {
+      "get": {
+        "summary": "Get a user's admin detail view (Admin only)",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User details retrieved"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Suspend a user account (Admin only)",
+        "description": "Soft-deletes a non-admin user by setting its account status to suspended and writing an audit entry atomically.",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User suspended"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required",
+            "protected account": null,
+            "or self-update": null
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/admin/users/{id}/status": {
+      "put": {
+        "summary": "Update a user's account access status (Admin only)",
+        "description": "Updates the user's lifecycle status and writes its audit event atomically. An admin cannot change their own account status.",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive",
+                      "pending",
+                      "suspended"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account status updated"
+          },
+          "400": {
+            "description": "Invalid account status"
+          },
+          "403": {
+            "description": "Admin access required or self-update is not allowed"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/api/admin/users/admin": {
+      "post": {
+        "summary": "Create an administrator account (Admin only)",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "minLength": 8
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Administrator created"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "409": {
+            "description": "Email already exists"
+          }
+        }
+      }
+    },
     "/api/admin/users": {
       "get": {
-        "summary": "Get all users with filters (Admin only)",
+        "summary": "List users and account lifecycle data (Admin only)",
         "tags": [
           "Admin"
         ],
@@ -682,7 +1930,8 @@
             "name": "page",
             "schema": {
               "type": "integer",
-              "default": 1
+              "default": 1,
+              "minimum": 1
             }
           },
           {
@@ -690,7 +1939,9 @@
             "name": "limit",
             "schema": {
               "type": "integer",
-              "default": 10
+              "default": 10,
+              "minimum": 1,
+              "maximum": 100
             }
           },
           {
@@ -701,7 +1952,8 @@
               "enum": [
                 "admin",
                 "doctor",
-                "hospital"
+                "hospital",
+                "patient"
               ]
             }
           },
@@ -713,6 +1965,7 @@
               "enum": [
                 "active",
                 "inactive",
+                "pending",
                 "suspended"
               ]
             }
@@ -729,6 +1982,13 @@
             "name": "sortBy",
             "schema": {
               "type": "string",
+              "enum": [
+                "createdAt",
+                "email",
+                "status",
+                "role",
+                "id"
+              ],
               "default": "createdAt"
             }
           },
@@ -747,31 +2007,420 @@
         ],
         "responses": {
           "200": {
-            "description": "Users retrieved successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object"
-                      }
-                    },
-                    "pagination": {
-                      "type": "object"
-                    }
+            "description": "Users retrieved successfully"
+          },
+          "400": {
+            "description": "Invalid query parameter"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/doctors/{id}/reject": {
+      "put": {
+        "summary": "Reject a doctor's licence (Admin only)",
+        "description": "Updates doctors.license_verification_status to rejected and stores the required reason in the atomic audit event. It does not change users.status.",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
                   }
                 }
               }
             }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Doctor verification rejected"
           },
-          "401": {
-            "description": "Unauthorized"
+          "400": {
+            "description": "Rejection reason is required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Doctor not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/doctors/{id}": {
+      "get": {
+        "summary": "Get doctor verification details and credential statuses (Admin only)",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doctor verification details"
+          },
+          "404": {
+            "description": "Doctor not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/doctors/{id}/verify": {
+      "put": {
+        "summary": "Verify a doctor's licence (Admin only)",
+        "description": "Verifies the doctor's licence, writes the audit event, and activates the linked user only when the account is currently pending. Suspended or inactive accounts remain unchanged.",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Doctor verified"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Doctor not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/doctors": {
+      "get": {
+        "summary": "List doctor licence-verification reviews (Admin only)",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "verified",
+                "rejected",
+                "all"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Doctor verification reviews"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/hospitals/{id}/reject": {
+      "put": {
+        "summary": "Reject a hospital registration (Admin only)",
+        "description": "Updates hospitals.license_verification_status to rejected and stores the required reason in the atomic audit event. It does not change users.status.",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hospital verification rejected"
+          },
+          "400": {
+            "description": "Rejection reason is required"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Hospital not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/hospitals/{id}": {
+      "get": {
+        "summary": "Get hospital verification details and document statuses (Admin only)",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hospital verification details"
+          },
+          "404": {
+            "description": "Hospital not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/hospitals/{id}/verify": {
+      "put": {
+        "summary": "Verify a hospital registration (Admin only)",
+        "description": "Verifies the hospital licence, writes the audit event, and activates the linked user only when the account is currently pending. Suspended or inactive accounts remain unchanged.",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hospital verified"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin access required"
+          },
+          "404": {
+            "description": "Hospital not found"
+          }
+        }
+      }
+    },
+    "/api/admin/verifications/hospitals": {
+      "get": {
+        "summary": "List hospital registration-verification reviews (Admin only)",
+        "tags": [
+          "Admin Verifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "verified",
+                "rejected",
+                "all"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hospital verification reviews"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "403": {
+            "description": "Admin access required"
           }
         }
       }
@@ -1018,6 +2667,78 @@
         }
       }
     },
+    "/api/assignments/{id}/status": {
+      "patch": {
+        "summary": "Update an assignment status",
+        "description": "Updates the assignment and any related slot or payment record atomically. Completing a paid home visit creates its pending patient-payment settlement from the booking-time fee snapshot; complimentary visits do not create a settlement.",
+        "tags": [
+          "Assignments"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "declined",
+                      "completed",
+                      "cancelled"
+                    ]
+                  },
+                  "cancellationReason": {
+                    "type": "string"
+                  },
+                  "treatmentNotes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Assignment updated successfully"
+          },
+          "400": {
+            "description": "Invalid status transition or booking rule"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Assignment not found"
+          },
+          "500": {
+            "description": "Unable to update assignment"
+          }
+        }
+      }
+    },
     "/api/bookings/{id}": {
       "get": {
         "summary": "Get booking/assignment by ID",
@@ -1160,6 +2881,88 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          }
+        }
+      }
+    },
+    "/api/bookings/home-visit/{id}/payment-order": {
+      "post": {
+        "summary": "Create a Razorpay order for a completed paid home visit",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Payment order created"
+          },
+          "400": {
+            "description": "Visit is not eligible for payment"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/bookings/home-visit": {
+      "get": {
+        "summary": "Get a patient's home-visit booking quote for a doctor",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "doctorId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a patient home-visit booking",
+        "description": "Applies availability, free-trial, and booking-time payment snapshot rules.",
+        "tags": [
+          "Home Visits"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Home visit booking created"
+          },
+          "400": {
+            "description": "Invalid booking request or unavailable slot"
+          },
+          "401": {
+            "description": "Authentication required"
           }
         }
       }
@@ -2336,6 +4139,35 @@
               "format": "uuid"
             },
             "description": "Doctor ID"
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Optional date filter (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital",
+                "home_visit"
+              ]
+            },
+            "description": "Optional slot type filter"
+          },
+          {
+            "in": "query",
+            "name": "allSlots",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Return all slots (parent + sub-slots) in flat format"
           }
         ],
         "responses": {
@@ -2380,6 +4212,20 @@
                               "available",
                               "booked",
                               "blocked"
+                            ]
+                          },
+                          "slotType": {
+                            "type": "string",
+                            "enum": [
+                              "hospital",
+                              "home_visit"
+                            ]
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "hospital",
+                              "home_visit"
                             ]
                           },
                           "isManual": {
@@ -2457,6 +4303,14 @@
                       "blocked"
                     ],
                     "default": "available"
+                  },
+                  "slotType": {
+                    "type": "string",
+                    "enum": [
+                      "hospital",
+                      "home_visit"
+                    ],
+                    "default": "hospital"
                   },
                   "isManual": {
                     "type": "boolean",
@@ -3159,7 +5013,8 @@
     },
     "/api/doctors/{id}/payments": {
       "get": {
-        "summary": "Get payments for a doctor",
+        "summary": "List a doctor's assignment payments and settlement balances",
+        "description": "Returns hospital-assignment and home-visit records. `patientPaymentStatus` applies to home visits; `paymentStatus` is always the doctor-settlement status.",
         "tags": [
           "Doctors"
         ],
@@ -3176,8 +5031,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "description": "Doctor ID"
+            }
           },
           {
             "in": "query",
@@ -3185,17 +5039,27 @@
             "schema": {
               "type": "integer",
               "default": 1
-            },
-            "description": "Page number"
+            }
           },
           {
             "in": "query",
             "name": "limit",
             "schema": {
               "type": "integer",
-              "default": 20
-            },
-            "description": "Items per page"
+              "default": 20,
+              "maximum": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hospital_assignment",
+                "home_visit"
+              ]
+            }
           },
           {
             "in": "query",
@@ -3208,139 +5072,18 @@
                 "completed",
                 "failed"
               ]
-            },
-            "description": "Filter by payment status"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Payments retrieved successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "payments": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "assignmentId": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "consultationFee": {
-                                "type": "number"
-                              },
-                              "platformCommission": {
-                                "type": "number"
-                              },
-                              "doctorPayout": {
-                                "type": "number"
-                              },
-                              "paymentStatus": {
-                                "type": "string",
-                                "enum": [
-                                  "pending",
-                                  "processing",
-                                  "completed",
-                                  "failed"
-                                ]
-                              },
-                              "paidToDoctorAt": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "assignment": {
-                                "type": "object",
-                                "properties": {
-                                  "completedAt": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                    "nullable": true
-                                  },
-                                  "status": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "hospital": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "format": "uuid"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "patient": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "format": "uuid"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "pagination": {
-                          "type": "object",
-                          "properties": {
-                            "page": {
-                              "type": "integer"
-                            },
-                            "limit": {
-                              "type": "integer"
-                            },
-                            "total": {
-                              "type": "integer"
-                            },
-                            "totalPages": {
-                              "type": "integer"
-                            },
-                            "hasNextPage": {
-                              "type": "boolean"
-                            },
-                            "hasPrevPage": {
-                              "type": "boolean"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Payments retrieved successfully"
           },
           "403": {
-            "description": "Doctor can only view their own payments"
+            "description": "Doctor can only view their own payment records"
           },
           "500": {
-            "description": "Internal server error"
+            "description": "Unable to load payment records"
           }
         }
       }
@@ -8477,6 +10220,721 @@
         }
       }
     },
+    "/api/patients/addresses/{id}": {
+      "put": {
+        "summary": "Update a specific saved address by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved address ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "addressText": {
+                    "type": "string"
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "isDefault": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Address updated successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Address not found or unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a specific saved address by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved address ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Address deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Address not found or unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/addresses": {
+      "get": {
+        "summary": "Get logged-in patient's saved addresses",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of saved addresses"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new saved address for the logged-in patient",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "label",
+                  "addressText"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "example": "Home"
+                  },
+                  "addressText": {
+                    "type": "string",
+                    "example": "123 Main St, Bandra, Mumbai"
+                  },
+                  "latitude": {
+                    "type": "number",
+                    "example": 19.076
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "example": 72.877
+                  },
+                  "isDefault": {
+                    "type": "boolean",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Address saved successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/bookings": {
+      "get": {
+        "summary": "Get logged-in patient's home visit bookings",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of the patient's home visit bookings"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/doctors/search": {
+      "get": {
+        "summary": "Search verified doctors for home visits by name, specialty or radius",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Free text search across doctor name or specialty name"
+          },
+          {
+            "in": "query",
+            "name": "specialtyId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Filter doctors that have this specialty"
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "description": "Latitude of the search center. Optional — when omitted, the patient's default saved address is used."
+          },
+          {
+            "in": "query",
+            "name": "lon",
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "description": "Longitude of the search center. Optional — when omitted, the patient's default saved address is used."
+          },
+          {
+            "in": "query",
+            "name": "radius",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Search radius in kilometers"
+          },
+          {
+            "in": "query",
+            "name": "minRating",
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "description": "Minimum average rating"
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "distance",
+                "rating",
+                "experience"
+              ],
+              "default": "distance"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortOrder",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            },
+            "description": "Defaults to asc for distance, desc for rating/experience"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of doctors matched by the search"
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/patients/family-members/{id}": {
+      "put": {
+        "summary": "Update a specific saved family member by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved family member ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullName": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "relationship": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Family member updated successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Family member not found or unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a specific saved family member by ID",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Saved family member ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Family member deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Family member not found or unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/family-members": {
+      "get": {
+        "summary": "Get logged-in patient's saved family members",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of saved family members"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a new saved family member for the logged-in patient",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fullName",
+                  "phone",
+                  "relationship"
+                ],
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "example": "Jane Doe Jr."
+                  },
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543211"
+                  },
+                  "relationship": {
+                    "type": "string",
+                    "example": "Child"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Family member saved successfully"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/payments": {
+      "get": {
+        "summary": "List a patient's completed home-visit payment transactions",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment history retrieved"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/patients/profile-photo/upload": {
+      "post": {
+        "summary": "Upload and set the signed-in patient's profile photo",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile photo uploaded successfully"
+          },
+          "400": {
+            "description": "Invalid image or upload request"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/api/patients/profile": {
+      "get": {
+        "summary": "Get logged-in patient's profile and account contact details",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile retrieved successfully, including read-only email, phone, and profile photo URL"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update logged-in patient's profile details",
+        "tags": [
+          "Patients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fullName"
+                ],
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "example": "Jane Doe"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully"
+          },
+          "400": {
+            "description": "Invalid parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/patients/signup": {
+      "post": {
+        "summary": "Register a new patient",
+        "tags": [
+          "Patients"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password",
+                  "fullName"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "example": "patient@example.com"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "example": "SecurePassword123!"
+                  },
+                  "fullName": {
+                    "type": "string",
+                    "example": "John Doe"
+                  },
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210"
+                  },
+                  "device": {
+                    "type": "object",
+                    "properties": {
+                      "device_token": {
+                        "type": "string"
+                      },
+                      "device_type": {
+                        "type": "string",
+                        "enum": [
+                          "ios",
+                          "android",
+                          "web"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Patient registered successfully. Patient accounts are immediately active and do not require provider verification."
+          },
+          "400": {
+            "description": "Bad request / validation failure"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
     "/api/payments/{id}": {
       "get": {
         "summary": "Get payment by ID",
@@ -8878,7 +11336,7 @@
     "/api/payments/verify": {
       "post": {
         "summary": "Verify payment after successful transaction",
-        "description": "Verifies Razorpay payment signature, updates order status, creates payment transaction record, and creates subscription if payment is successful. Also handles upgrades and billing cycle changes automatically.",
+        "description": "Verifies a Razorpay payment. For a completed paid home visit, it atomically records the patient payment and makes the doctor settlement pending. Subscription flows keep their existing lifecycle.",
         "tags": [
           "Payments"
         ],
@@ -10922,7 +13380,8 @@
                     "enum": [
                       "doctor",
                       "hospital",
-                      "admin"
+                      "admin",
+                      "patient"
                     ],
                     "description": "Optional. Expected account type for validation. If provided, must match user's actual role.",
                     "example": "doctor"
@@ -10934,7 +13393,7 @@
         },
         "responses": {
           "200": {
-            "description": "Login successful",
+            "description": "Login successful. The user's last_login_at timestamp is updated after credentials and account type are validated.",
             "content": {
               "application/json": {
                 "schema": {

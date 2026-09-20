@@ -16,6 +16,7 @@ interface AvailabilityTemplate {
   recurrenceDays: string[];
   validFrom: string;
   validUntil?: string | null;
+  slotType?: 'hospital' | 'home_visit';
 }
 
 interface ManageTemplatesModalProps {
@@ -64,6 +65,7 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
     recurrenceDays: [] as string[],
     validFrom: new Date().toISOString().split('T')[0],
     validUntil: '',
+    slotType: 'hospital' as 'hospital' | 'home_visit',
   });
 
   const timeOptions = useMemo(() => {
@@ -115,6 +117,7 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
       recurrenceDays: [],
       validFrom: new Date().toISOString().split('T')[0],
       validUntil: '',
+      slotType: 'hospital',
     });
   };
 
@@ -169,6 +172,7 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
             : formData.recurrenceDays,
         validFrom: formData.validFrom,
         validUntil: formData.validUntil || undefined,
+        slotType: formData.slotType,
       };
 
       const url = editingTemplateId
@@ -221,6 +225,7 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
       recurrenceDays: template.recurrenceDays || [],
       validFrom: template.validFrom,
       validUntil: template.validUntil || '',
+      slotType: template.slotType || 'hospital',
     });
   };
 
@@ -390,6 +395,37 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
                 </div>
               </div>
 
+              <div>
+                <label className="text-sm text-gray-700 font-medium">Slot type</label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, slotType: 'hospital' }))}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      formData.slotType === 'hospital'
+                        ? 'bg-[#0066CC] text-white border-[#0066CC]'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Hospital
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, slotType: 'home_visit' }))}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      formData.slotType === 'home_visit'
+                        ? 'bg-[#0066CC] text-white border-[#0066CC]'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Home visit
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Hospital = bookable by hospitals. Home visit = bookable by patients for home visits.
+                </p>
+              </div>
+
               {formError && (
                 <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{formError}</div>
               )}
@@ -475,6 +511,17 @@ export function ManageTemplatesModal({ doctorId, onClose }: ManageTemplatesModal
                       <p>
                         Valid: {template.validFrom}{' '}
                         {template.validUntil ? `→ ${template.validUntil}` : '(no end date)'}
+                      </p>
+                      <p className="inline-flex items-center gap-2">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                            template.slotType === 'home_visit'
+                              ? 'bg-[#ECFDF5] text-[#047857]'
+                              : 'bg-[#EFF6FF] text-[#1E3A8A]'
+                          }`}
+                        >
+                          {template.slotType === 'home_visit' ? 'Home visit' : 'Hospital'}
+                        </span>
                       </p>
                     </div>
                   </div>

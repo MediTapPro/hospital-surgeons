@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Search, Eye, Check, X, MessageSquare, Download, ZoomIn, ZoomOut, Loader2 } from 'lucide-react';
+import { Search, Eye, Check, X, Download, ZoomIn, ZoomOut, Loader2 } from 'lucide-react';
 import { StatusBadge } from '../StatusBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface Hospital {
   id: string;
@@ -92,8 +94,8 @@ export function HospitalVerifications() {
         params.append('search', searchQuery);
       }
 
-      const response = await fetch(`/api/admin/verifications/hospitals?${params.toString()}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/verifications/hospitals?${params.toString()}`);
+      const data = response.data;
 
       if (data.success) {
         setHospitals(data.data);
@@ -112,8 +114,8 @@ export function HospitalVerifications() {
   const fetchHospitalDetail = async (hospitalId: string) => {
     try {
       setLoadingDetail(true);
-      const response = await fetch(`/api/admin/verifications/hospitals/${hospitalId}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/verifications/hospitals/${hospitalId}`);
+      const data = response.data;
 
       if (data.success) {
         setSelectedHospital(data.data);
@@ -133,13 +135,8 @@ export function HospitalVerifications() {
 
     try {
       setUpdating(selectedHospital.id);
-      const response = await fetch(`/api/admin/verifications/hospitals/${selectedHospital.id}/verify`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/verifications/hospitals/${selectedHospital.id}/verify`, { notes });
+      const data = response.data;
 
       if (data.success) {
         toast.success('Hospital verified successfully');
@@ -165,13 +162,8 @@ export function HospitalVerifications() {
 
     try {
       setUpdating(selectedHospital.id);
-      const response = await fetch(`/api/admin/verifications/hospitals/${selectedHospital.id}/reject`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: rejectReason, notes }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/verifications/hospitals/${selectedHospital.id}/reject`, { reason: rejectReason, notes });
+      const data = response.data;
 
       if (data.success) {
         toast.success('Hospital verification rejected');
@@ -200,14 +192,46 @@ export function HospitalVerifications() {
     });
   };
 
+  const tableColumns: AdminDataTableColumn<Hospital>[] = [
+    {
+      id: 'hospital', label: 'Hospital', widthClassName: 'w-[235px]',
+      cell: (hospital) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-navy-100 font-semibold text-navy-700">
+            {hospital.name.charAt(0)}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate font-medium text-slate-900">{hospital.name}</p>
+            <p className="truncate text-sm text-slate-500">{hospital.registrationNumber}</p>
+          </div>
+        </div>
+      ),
+    },
+    { id: 'email', label: 'Email', widthClassName: 'w-[275px]', cellClassName: 'text-slate-600', cell: (hospital) => hospital.email },
+    { id: 'type', label: 'Type', widthClassName: 'w-[130px]', cellClassName: 'whitespace-nowrap font-medium text-slate-900', cell: (hospital) => hospital.hospitalType || 'N/A' },
+    { id: 'beds', label: 'Beds', widthClassName: 'w-[110px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (hospital) => hospital.numberOfBeds || 'N/A' },
+    { id: 'documents', label: 'Documents', widthClassName: 'w-[165px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (hospital) => `${hospital.documentsCount} (${hospital.pendingDocumentsCount} pending)` },
+    { id: 'submitted', label: 'Submitted', widthClassName: 'w-[145px]', cellClassName: 'whitespace-nowrap text-slate-600', cell: (hospital) => formatDate(hospital.createdAt) },
+    { id: 'status', label: 'Status', widthClassName: 'w-[125px]', cell: (hospital) => <StatusBadge status={hospital.licenseVerificationStatus} /> },
+    {
+      id: 'actions', label: 'Actions', widthClassName: 'w-[135px]', sticky: 'right',
+      cell: (hospital) => (
+        <Button size="sm" variant="ghost" onClick={() => fetchHospitalDetail(hospital.id)} disabled={loadingDetail} className="w-full justify-center whitespace-nowrap">
+          <Eye className="mr-1 h-4 w-4" />
+          Review
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-full bg-slate-50">
       <PageHeader 
         title="Hospital Verifications" 
         description="Review and verify hospital registration applications"
       />
 
-      <div className="p-8">
+      <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
         <Tabs 
           value={activeTab} 
           onValueChange={(value) => {
@@ -216,17 +240,16 @@ export function HospitalVerifications() {
           }} 
           className="space-y-6"
         >
-          <TabsList>
+          <TabsList className="h-11 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             <TabsTrigger value="pending">Pending</TabsTrigger>
             <TabsTrigger value="approved">Approved</TabsTrigger>
             <TabsTrigger value="rejected">Rejected</TabsTrigger>
           </TabsList>
 
           <TabsContent value={activeTab} className="space-y-4">
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b border-slate-200">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1 relative">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                <div className="relative max-w-2xl">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                     <Input
                       placeholder="Search by name, type, or registration number..."
@@ -235,10 +258,9 @@ export function HospitalVerifications() {
                         setSearchQuery(e.target.value);
                         setPage(1);
                       }}
-                      className="pl-10"
+                      className="h-11 border-slate-300 bg-white pl-10 shadow-sm"
                     />
                   </div>
-                </div>
               </div>
 
               {loading ? (
@@ -248,71 +270,16 @@ export function HospitalVerifications() {
                 </div>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-slate-600">Hospital</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Email</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Type</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Beds</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Documents</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Submitted</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                          <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200">
-                        {hospitals.length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
-                              No hospitals found
-                            </td>
-                          </tr>
-                        ) : (
-                          hospitals.map((hospital) => (
-                            <tr key={hospital.id} className="hover:bg-slate-50">
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded bg-navy-100 flex items-center justify-center text-navy-700 font-semibold">
-                                    {hospital.name.charAt(0)}
-                                  </div>
-                                  <div>
-                                    <div className="text-slate-900">{hospital.name}</div>
-                                    <div className="text-slate-500 text-sm">{hospital.registrationNumber}</div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-slate-600 text-sm">{hospital.email}</td>
-                              <td className="px-6 py-4 text-slate-900">{hospital.hospitalType || 'N/A'}</td>
-                              <td className="px-6 py-4 text-slate-600">{hospital.numberOfBeds || 'N/A'}</td>
-                              <td className="px-6 py-4 text-slate-600">
-                                {hospital.documentsCount} ({hospital.pendingDocumentsCount} pending)
-                              </td>
-                              <td className="px-6 py-4 text-slate-600 text-sm">{formatDate(hospital.createdAt)}</td>
-                              <td className="px-6 py-4">
-                                <StatusBadge status={hospital.licenseVerificationStatus} />
-                              </td>
-                              <td className="px-6 py-4">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => fetchHospitalDetail(hospital.id)}
-                                  disabled={loadingDetail}
-                                >
-                                  <Eye className="w-4 h-4 mr-1" />
-                                  Review
-                                </Button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  <AdminDataTable
+                    columns={tableColumns}
+                    data={hospitals}
+                    emptyMessage="No hospitals found"
+                    getRowKey={(hospital) => hospital.id}
+                    minWidthClassName="min-w-[1300px]"
+                  />
 
                   {totalPages > 1 && (
-                    <div className="p-4 border-t border-slate-200 flex items-center justify-between">
+                    <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-sm text-slate-600">
                         Page {page} of {totalPages}
                       </div>
@@ -345,22 +312,22 @@ export function HospitalVerifications() {
 
       {/* Verification Detail Modal */}
       <Dialog open={!!selectedHospital} onOpenChange={() => setSelectedHospital(null)}>
-        <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col bg-white dark:bg-gray-900 p-0">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-200 flex-shrink-0">
+        <DialogContent size="wide" className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-6">
             <DialogTitle>Hospital Verification Review</DialogTitle>
             <DialogDescription>
               Review hospital documents and information before verification
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
             {loadingDetail ? (
               <div className="p-8 text-center">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto text-teal-600 mb-4" />
                 <p className="text-slate-600">Loading hospital details...</p>
               </div>
             ) : selectedHospital ? (
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               {/* Left Panel - Profile */}
               <div className="space-y-6">
                 <div className="bg-slate-50 rounded-lg p-6">
@@ -447,7 +414,7 @@ export function HospitalVerifications() {
                   <label className="text-sm font-medium text-slate-600 mb-2 block">Documents</label>
                   <div className="space-y-2 max-h-96 overflow-y-auto">
                     {selectedHospital.documents.length === 0 ? (
-                      <p className="text-slate-500 text-center py-8">No documents uploaded</p>
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-slate-500">No documents uploaded</div>
                     ) : (
                       selectedHospital.documents.map((doc) => (
                         <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
@@ -515,15 +482,7 @@ export function HospitalVerifications() {
             ) : null}
           </div>
 
-          <DialogFooter className="flex items-center justify-between border-t border-gray-200 px-6 py-4 flex-shrink-0 bg-gray-50">
-            <Button
-              variant="outline"
-              onClick={() => setSelectedHospital(null)}
-              className="border-amber-600 text-amber-600 hover:bg-amber-50"
-            >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Request Info
-            </Button>
+          <DialogFooter className="shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row">
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"

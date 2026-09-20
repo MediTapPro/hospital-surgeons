@@ -6,6 +6,7 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const doctorId = searchParams.get('doctorId');
     const bookingDate = searchParams.get('bookingDate');
+    const type = searchParams.get('type') || 'hospital';
     
     if (!doctorId || !bookingDate) {
       return NextResponse.json(
@@ -14,8 +15,15 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    if (type !== 'hospital' && type !== 'home_visit') {
+      return NextResponse.json(
+        { success: false, message: 'Invalid type parameter. Must be "hospital" or "home_visit"' },
+        { status: 400 }
+      );
+    }
+
     const bookingsService = new BookingsService();
-    const result = await bookingsService.getAvailableTimeSlots(doctorId, bookingDate);
+    const result = await bookingsService.getAvailableTimeSlots(doctorId, bookingDate, type);
     
     return NextResponse.json(result, { status: result.success ? 200 : 400 });
   } catch (error) {

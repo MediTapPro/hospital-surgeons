@@ -1,4 +1,4 @@
-import { pgTable, foreignKey, uuid, integer, text, check, boolean, timestamp, index, unique, varchar, bigint, numeric, type AnyPgColumn, json, time, date, jsonb, primaryKey, pgView } from "drizzle-orm/pg-core"
+import { pgTable, foreignKey, uuid, integer, text, check, boolean, timestamp, index, unique, uniqueIndex, varchar, bigint, numeric, type AnyPgColumn, json, time, date, jsonb, primaryKey, pgView } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -39,16 +39,19 @@ export const patientConsents = pgTable("patient_consents", {
 export const chatConversations = pgTable("chat_conversations", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	doctorId: uuid("doctor_id").notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
+	patientProfileId: uuid("patient_profile_id"),
 	lastMessageAt: timestamp("last_message_at", { mode: 'string' }),
 	doctorUnreadCount: integer("doctor_unread_count").default(0).notNull(),
 	hospitalUnreadCount: integer("hospital_unread_count").default(0).notNull(),
+	patientUnreadCount: integer("patient_unread_count").default(0).notNull(),
 	isActive: boolean("is_active").default(true).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => [
 	index("idx_chat_conversations_doctor_id").using("btree", table.doctorId.asc().nullsLast().op("uuid_ops")),
 	index("idx_chat_conversations_hospital_id").using("btree", table.hospitalId.asc().nullsLast().op("uuid_ops")),
+	index("idx_chat_conversations_patient_profile_id").using("btree", table.patientProfileId.asc().nullsLast().op("uuid_ops")),
 	index("idx_chat_conversations_updated_at").using("btree", table.updatedAt.desc().nullsFirst().op("timestamp_ops")),
 	foreignKey({
 			columns: [table.doctorId],
@@ -60,7 +63,13 @@ export const chatConversations = pgTable("chat_conversations", {
 			foreignColumns: [hospitals.id],
 			name: "chat_conversations_hospital_id_fkey"
 		}).onDelete("cascade"),
-	unique("chat_conversations_doctor_id_hospital_id_key").on(table.doctorId, table.hospitalId),
+	foreignKey({
+			columns: [table.patientProfileId],
+			foreignColumns: [patientProfiles.id],
+			name: "chat_conversations_patient_profile_id_fkey"
+		}).onDelete("cascade"),
+	uniqueIndex("chat_conversations_doctor_hospital_key").on(table.doctorId, table.hospitalId).where(sql`${table.hospitalId} IS NOT NULL`),
+	uniqueIndex("chat_conversations_doctor_patient_key").on(table.doctorId, table.patientProfileId).where(sql`${table.patientProfileId} IS NOT NULL`),
 ]);
 
 export const otps = pgTable("otps", {
@@ -134,7 +143,7 @@ export const chatMessageAttachments = pgTable("chat_message_attachments", {
 			foreignColumns: [chatMessages.id],
 			name: "chat_message_attachments_message_id_fkey"
 		}).onDelete("cascade"),
-	check("chat_message_attachments_uploaded_by_check", sql`uploaded_by = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_message_attachments_uploaded_by_check", sql`uploaded_by = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const chatMessageReactions = pgTable("chat_message_reactions", {
@@ -158,7 +167,7 @@ export const chatMessageReactions = pgTable("chat_message_reactions", {
 			name: "chat_message_reactions_message_id_fkey"
 		}).onDelete("cascade"),
 	unique("chat_message_reactions_message_id_reactor_id_key").on(table.messageId, table.reactorId),
-	check("chat_message_reactions_reactor_type_check", sql`reactor_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_message_reactions_reactor_type_check", sql`reactor_type = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const cronConfig = pgTable("cron_config", {
@@ -566,6 +575,7 @@ export const availabilityTemplates = pgTable("availability_templates", {
 	recurrenceDays: text("recurrence_days"),
 	validFrom: date("valid_from").notNull(),
 	validUntil: date("valid_until"),
+	slotType: text("slot_type").default('hospital').notNull(),
 }, (table) => [
 	foreignKey({
 			columns: [table.doctorId],
@@ -574,6 +584,7 @@ export const availabilityTemplates = pgTable("availability_templates", {
 		}).onDelete("cascade"),
 	check("availability_templates_check", sql`end_time > start_time`),
 	check("availability_templates_recurrence_pattern_check", sql`recurrence_pattern = ANY (ARRAY['daily'::text, 'weekly'::text, 'monthly'::text, 'custom'::text])`),
+	check("availability_templates_slot_type_check", sql`slot_type = ANY (ARRAY['hospital'::text, 'home_visit'::text])`),
 ]);
 
 export const hospitalDepartments = pgTable("hospital_departments", {
@@ -665,10 +676,12 @@ export const doctorAssignmentUsage = pgTable("doctor_assignment_usage", {
 
 export const assignments = pgTable("assignments", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
 	doctorId: uuid("doctor_id").notNull(),
-	patientId: uuid("patient_id").notNull(),
+	patientId: uuid("patient_id"),
+	patientProfileId: uuid("patient_profile_id"),
 	availabilitySlotId: uuid("availability_slot_id"),
+	source: text().default('hospital').notNull(),
 	priority: text().default('medium').notNull(),
 	status: text().default('pending').notNull(),
 	requestedAt: timestamp("requested_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -713,6 +726,11 @@ export const assignments = pgTable("assignments", {
 			name: "assignments_patient_id_fkey"
 		}).onDelete("cascade"),
 	foreignKey({
+			columns: [table.patientProfileId],
+			foreignColumns: [patientProfiles.id],
+			name: "assignments_patient_profile_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
 			columns: [table.priority],
 			foreignColumns: [enumPriority.priority],
 			name: "assignments_priority_fkey"
@@ -742,7 +760,8 @@ export const assignments = pgTable("assignments", {
 			foreignColumns: [enumStatus.status],
 			name: "assignments_status_fkey"
 		}),
-	check("assignments_cancelled_by_check", sql`cancelled_by = ANY (ARRAY['hospital'::text, 'doctor'::text, 'system'::text])`),
+	check("assignments_cancelled_by_check", sql`cancelled_by = ANY (ARRAY['hospital'::text, 'doctor'::text, 'system'::text, 'patient'::text])`),
+	check("assignments_source_check", sql`source = ANY (ARRAY['hospital'::text, 'patient'::text])`),
 ]);
 
 export const patients = pgTable("patients", {
@@ -777,11 +796,16 @@ export const enumPriority = pgTable("enum_priority", {
 export const assignmentPayments = pgTable("assignment_payments", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	assignmentId: uuid("assignment_id").notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
 	doctorId: uuid("doctor_id").notNull(),
 	consultationFee: numeric("consultation_fee", { precision: 10, scale:  2 }).notNull(),
 	platformCommission: numeric("platform_commission", { precision: 10, scale:  2 }).default('0.00').notNull(),
 	doctorPayout: numeric("doctor_payout", { precision: 10, scale:  2 }).notNull(),
+	paymentSource: text("payment_source").default('hospital_assignment').notNull(),
+	patientPaymentStatus: text("patient_payment_status").default('not_applicable').notNull(),
+	patientPaidAt: timestamp("patient_paid_at", { mode: 'string' }),
+	paymentTransactionId: uuid("payment_transaction_id"),
+	paymentOrderId: uuid("payment_order_id"),
 	paymentStatus: text("payment_status").default('pending').notNull(),
 	paidToDoctorAt: timestamp("paid_to_doctor_at", { mode: 'string' }),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -803,8 +827,15 @@ export const assignmentPayments = pgTable("assignment_payments", {
 			name: "assignment_payments_hospital_id_fkey"
 		}).onDelete("cascade"),
 	unique("assignment_payments_assignment_id_key").on(table.assignmentId),
+	index("idx_assignment_payments_payment_source").using("btree", table.paymentSource.asc().nullsLast().op("text_ops")),
+	index("idx_assignment_payments_patient_payment_status").using("btree", table.patientPaymentStatus.asc().nullsLast().op("text_ops")),
+	index("idx_assignment_payments_payment_transaction_id").using("btree", table.paymentTransactionId.asc().nullsLast().op("uuid_ops")),
 	check("assignment_payments_payment_method_check", sql`(payment_method IS NULL) OR (payment_method = ANY (ARRAY['upi'::text, 'cash'::text, 'online'::text]))`),
+	// Matches lib/enums/assignment-payments.enums.ts.
 	check("assignment_payments_payment_status_check", sql`payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text])`),
+	check("assignment_payments_payment_source_check", sql`payment_source = ANY (ARRAY['hospital_assignment'::text, 'home_visit'::text])`),
+	check("assignment_payments_patient_payment_status_check", sql`patient_payment_status = ANY (ARRAY['not_applicable'::text, 'pending'::text, 'paid'::text, 'failed'::text, 'refunded'::text])`),
+	check("assignment_payments_source_consistency_check", sql`(payment_source = 'hospital_assignment'::text AND hospital_id IS NOT NULL AND patient_payment_status = 'not_applicable'::text) OR (payment_source = 'home_visit'::text AND hospital_id IS NULL)`),
 ]);
 
 export const auditLogs = pgTable("audit_logs", {
@@ -848,6 +879,7 @@ export const orders = pgTable("orders", {
 	orderType: text("order_type").notNull(),
 	planId: uuid("plan_id"),
 	pricingId: uuid("pricing_id"),
+	assignmentId: uuid("assignment_id"),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	amount: bigint({ mode: "number" }).notNull(),
 	currency: text().default('USD').notNull(),
@@ -878,6 +910,11 @@ export const orders = pgTable("orders", {
 			foreignColumns: [users.id],
 			name: "orders_user_id_fkey"
 		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.assignmentId],
+			foreignColumns: [assignments.id],
+			name: "orders_assignment_id_fkey"
+		}).onDelete("set null"),
 	check("orders_order_type_check", sql`order_type = ANY (ARRAY['subscription'::text, 'consultation'::text, 'other'::text])`),
 	check("orders_status_check", sql`status = ANY (ARRAY['pending'::text, 'paid'::text, 'failed'::text, 'expired'::text, 'refunded'::text])`),
 	check("orders_user_role_check", sql`(user_role IS NULL) OR (user_role = ANY (ARRAY['doctor'::text, 'hospital'::text]))`),
@@ -1286,7 +1323,7 @@ export const chatMessages = pgTable("chat_messages", {
 			name: "chat_messages_reply_to_id_fkey"
 		}).onDelete("set null"),
 	check("chat_messages_message_type_check", sql`message_type = ANY (ARRAY['text'::text, 'attachment'::text, 'system'::text])`),
-	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text])`),
+	check("chat_messages_sender_type_check", sql`sender_type = ANY (ARRAY['doctor'::text, 'hospital'::text, 'patient'::text])`),
 ]);
 
 export const hospitalPlanFeatures = pgTable("hospital_plan_features", {
@@ -1385,6 +1422,7 @@ export const doctorAvailability = pgTable("doctor_availability", {
 	startTime: time("start_time").notNull(),
 	endTime: time("end_time").notNull(),
 	status: text().default('available').notNull(),
+	slotType: text("slot_type").default('hospital').notNull(),
 	isManual: boolean("is_manual").default(false),
 	bookedByHospitalId: uuid("booked_by_hospital_id"),
 	bookedAt: timestamp("booked_at", { mode: 'string' }),
@@ -1421,6 +1459,7 @@ export const doctorAvailability = pgTable("doctor_availability", {
 			name: "doctor_availability_template_id_fkey"
 		}).onDelete("set null"),
 	check("doctor_availability_check", sql`end_time > start_time`),
+	check("doctor_availability_slot_type_check", sql`slot_type = ANY (ARRAY['hospital'::text, 'home_visit'::text])`),
 ]);
 
 export const doctorLeaves = pgTable("doctor_leaves", {
@@ -1487,6 +1526,7 @@ export const geometryColumns = pgView("geometry_columns", {	fTableCatalog: varch
 export const patientProfiles = pgTable("patient_profiles", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	userId: uuid("user_id").notNull(),
+	profilePhotoId: uuid("profile_photo_id"),
 	fullName: text("full_name").notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -1496,6 +1536,11 @@ export const patientProfiles = pgTable("patient_profiles", {
 		foreignColumns: [users.id],
 		name: "patient_profiles_user_id_fkey"
 	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.profilePhotoId],
+		foreignColumns: [files.id],
+		name: "patient_profiles_profile_photo_id_fkey"
+	}).onDelete("set null"),
 	unique("patient_profiles_user_id_key").on(table.userId),
 ]);
 
@@ -1533,3 +1578,89 @@ export const patientFamilyMembers = pgTable("patient_family_members", {
 	}).onDelete("cascade"),
 ]);
 
+export const homeVisitDetails = pgTable("home_visit_details", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	assignmentId: uuid("assignment_id").notNull(),
+	patientAddressId: uuid("patient_address_id"),
+	patientFamilyMemberId: uuid("patient_family_member_id"),
+	symptoms: text("symptoms"),
+	clinicalNotes: text("clinical_notes"),
+	prescription: text("prescription"),
+	attachmentFileId: uuid("attachment_file_id"),
+	// Snapshot of the saved address at booking time (display source of truth)
+	addressLabel: text("address_label"),
+	addressText: text("address_text"),
+	addressLatitude: numeric("address_latitude", { precision: 10, scale: 8 }),
+	addressLongitude: numeric("address_longitude", { precision: 11, scale: 8 }),
+	// Snapshot of the recipient (family member, or null for self) at booking time
+	recipientName: text("recipient_name"),
+	recipientPhone: text("recipient_phone"),
+	recipientRelationship: text("recipient_relationship"),
+	// Booking-time payment decision. These are home-visit-only and do not alter
+	// the shared hospital-to-doctor payment workflow.
+	paymentMode: text("payment_mode").default('free_trial').notNull(),
+	isFreeTrial: boolean("is_free_trial").default(true).notNull(),
+	platformCommission: numeric("platform_commission", { precision: 10, scale: 2 }).default('0.00').notNull(),
+	doctorPayout: numeric("doctor_payout", { precision: 10, scale: 2 }).default('0.00').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	unique("home_visit_details_assignment_id_key").on(table.assignmentId),
+	foreignKey({
+		columns: [table.assignmentId],
+		foreignColumns: [assignments.id],
+		name: "home_visit_details_assignment_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.patientAddressId],
+		foreignColumns: [patientAddresses.id],
+		name: "home_visit_details_patient_address_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.patientFamilyMemberId],
+		foreignColumns: [patientFamilyMembers.id],
+		name: "home_visit_details_patient_family_member_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.attachmentFileId],
+		foreignColumns: [files.id],
+		name: "home_visit_details_attachment_file_id_fkey"
+	}).onDelete("set null"),
+	check("home_visit_details_payment_mode_check", sql`payment_mode = ANY (ARRAY['free_trial'::text, 'pay_before_booking'::text, 'pay_after_completion'::text])`),
+]);
+
+export const platformHomeVisitFees = pgTable("platform_home_visit_fees", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	specialtyId: uuid("specialty_id"),
+	fee: numeric({ precision: 10, scale: 2 }).notNull(),
+	platformCommissionPercentage: numeric("platform_commission_percentage", { precision: 5, scale: 2 }).default('10.00').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	foreignKey({
+		columns: [table.specialtyId],
+		foreignColumns: [specialties.id],
+		name: "platform_home_visit_fees_specialty_id_fkey"
+	}).onDelete("cascade"),
+	unique("platform_home_visit_fees_specialty_id_key").on(table.specialtyId),
+]);
+
+// One platform-wide row controls home-visit availability and trial/payment rules.
+export const platformHomeVisitSettings = pgTable("platform_home_visit_settings", {
+	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
+	scope: text().default('global').notNull(),
+	homeVisitEnabled: boolean("home_visit_enabled").default(true).notNull(),
+	freeTrialEnabled: boolean("free_trial_enabled").default(true).notNull(),
+	freeTrialVisitLimit: integer("free_trial_visit_limit").default(1).notNull(),
+	freeTrialActiveBookingLimit: integer("free_trial_active_booking_limit").default(1).notNull(),
+	paidPaymentTiming: text("paid_payment_timing").default('pay_after_completion').notNull(),
+	allowEarlyAssignmentCompletion: boolean("allow_early_assignment_completion").default(false).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	unique("platform_home_visit_settings_scope_key").on(table.scope),
+	check("platform_home_visit_settings_scope_check", sql`scope = 'global'`),
+	check("platform_home_visit_settings_trial_visit_limit_check", sql`free_trial_visit_limit >= 0`),
+	check("platform_home_visit_settings_trial_active_booking_limit_check", sql`free_trial_active_booking_limit >= 1`),
+	check("platform_home_visit_settings_paid_payment_timing_check", sql`paid_payment_timing = ANY (ARRAY['pay_before_booking'::text, 'pay_after_completion'::text])`),
+]);

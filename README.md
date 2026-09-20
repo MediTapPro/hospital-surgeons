@@ -2,6 +2,8 @@
 
 A platform that lets patients find doctors, book home visits, receive digital prescriptions and visit notes, with free follow-up options — fully independent of hospital workflows.
 
+For the current implementation status and admin-portal handoff, see [README-ADMIN-PORTAL-HANDOFF.md](README-ADMIN-PORTAL-HANDOFF.md), [README-HOME-VISIT-MVP-HANDOFF.md](README-HOME-VISIT-MVP-HANDOFF.md), and [README-SPECIALTIES-HANDOFF.md](README-SPECIALTIES-HANDOFF.md).
+
 ---
 
 ## Overview

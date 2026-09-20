@@ -14,12 +14,13 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Headphones,
   ChevronLeft,
   ChevronRight,
   LogOut,
   Calendar,
   CalendarX,
+  Coins,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -87,12 +88,14 @@ export function Sidebar() {
     { id: "assignments", label: "Assignments", icon: ClipboardList, href: "/admin/assignments" },
     { id: "affiliations", label: "Affiliations", icon: Building2, href: "/admin/affiliations" },
     { id: "subscriptions", label: "Subscriptions", icon: Wallet, href: "/admin/subscriptions" },
+    { id: "payments", label: "Payments", icon: CreditCard, href: "/admin/payments" },
+    { id: "home-visit-fees", label: "Home Visit Fees", icon: Coins, href: "/admin/home-visit-fees" },
+    { id: "home-visit-settings", label: "Home Visit Settings", icon: SlidersHorizontal, href: "/admin/home-visit-settings" },
     { id: "analytics", label: "Analytics", icon: BarChart3, href: "/admin/analytics" },
     { id: "schedule-updates", label: "Schedule Updates", icon: Calendar, href: "/admin/schedule-updates" },
     { id: "vacation-updates", label: "Vacation Updates", icon: CalendarX, href: "/admin/vacation-updates" },
     { id: "audit-logs", label: "Audit Logs", icon: FileText, href: "/admin/audit-logs" },
-    { id: "settings", label: "Settings", icon: Settings, href: "/admin/settings" },
-    { id: "support", label: "Support", icon: Headphones, href: "/admin/support" },
+    { id: "settings", label: "Assignment Settings", icon: Settings, href: "/admin/settings" },
   ];
 
   const isActive = (href?: string) => {
@@ -106,7 +109,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "bg-slate-900 text-slate-100 transition-all duration-300 flex flex-col",
+        "sticky top-0 h-screen shrink-0 bg-slate-900 text-slate-100 transition-all duration-300 flex flex-col",
         collapsed ? "w-16" : "w-64",
       )}
     >
@@ -193,9 +196,4 @@ export function Sidebar() {
     </aside>
   );
 }
-
-
-
-
-
 

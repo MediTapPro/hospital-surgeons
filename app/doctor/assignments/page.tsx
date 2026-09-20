@@ -52,8 +52,20 @@ interface Assignment {
   treatmentNotes?: string | null;
   hospitalId: string;
   patientId: string;
+  hospitalAddress?: string | null;
   parentSlotId?: string | null;
   availabilitySlotId?: string | null;
+  source?: string;
+  patientPhone?: string | null;
+  visitAddress?: string | null;
+  visitAddressLabel?: string | null;
+  symptoms?: string | null;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
+  recipientRelationship?: string | null;
+  platformCommissionPercentage?: number;
+  platformCommission?: number;
+  doctorPayout?: number;
 }
 
 export default function AssignmentsPage() {
@@ -69,6 +81,8 @@ export default function AssignmentsPage() {
   const [tempToDate, setTempToDate] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [tempStatusFilter, setTempStatusFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('hospital');
+  const [tempSourceFilter, setTempSourceFilter] = useState('hospital');
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showDeclineModal, setShowDeclineModal] = useState(false);
@@ -143,7 +157,8 @@ export default function AssignmentsPage() {
     fromOverride?: string,
     toOverride?: string,
     statusOverride?: string,
-    searchOverride?: string
+    searchOverride?: string,
+    sourceOverride?: string
   ) => {
     if (!doctorId) return;
     
@@ -156,6 +171,11 @@ export default function AssignmentsPage() {
       const statusToUse = statusOverride !== undefined ? statusOverride : statusFilter;
       if (statusToUse !== 'all') {
         params.append('status', statusToUse);
+      }
+      
+      const sourceToUse = sourceOverride !== undefined ? sourceOverride : sourceFilter;
+      if (sourceToUse !== 'all') {
+        params.append('source', sourceToUse);
       }
       
       const fromToUse = fromOverride !== undefined ? fromOverride : fromDate;
@@ -195,9 +215,10 @@ export default function AssignmentsPage() {
   const handleApplyFilters = () => {
     setSearchQuery(tempSearchQuery);
     setStatusFilter(tempStatusFilter);
+    setSourceFilter(tempSourceFilter);
     setFromDate(tempFromDate);
     setToDate(tempToDate);
-    fetchAssignments(tempFromDate, tempToDate, tempStatusFilter, tempSearchQuery);
+    fetchAssignments(tempFromDate, tempToDate, tempStatusFilter, tempSearchQuery, tempSourceFilter);
   };
 
   const handleClearFilters = () => {
@@ -205,11 +226,13 @@ export default function AssignmentsPage() {
     setTempFromDate('');
     setTempToDate('');
     setTempStatusFilter('all');
+    setTempSourceFilter('hospital');
     setSearchQuery('');
     setFromDate('');
     setToDate('');
     setStatusFilter('all');
-    fetchAssignments('', '', 'all', '');
+    setSourceFilter('hospital');
+    fetchAssignments('', '', 'all', '', 'hospital');
   };
 
   const getStatusBadge = (status: string) => {
@@ -600,8 +623,22 @@ export default function AssignmentsPage() {
             </Select>
           </div>
 
+          {/* Source Filter */}
+          <div className="w-[180px]">
+            <Select value={tempSourceFilter} onValueChange={setTempSourceFilter}>
+              <SelectTrigger className="w-full h-10">
+                <SelectValue placeholder="All Sources" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sources</SelectItem>
+                <SelectItem value="hospital">Hospital</SelectItem>
+                <SelectItem value="patient">Home Visit</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Clear Button */}
-          {(tempSearchQuery || tempFromDate || tempToDate || tempStatusFilter !== 'all' || searchQuery || fromDate || toDate || statusFilter !== 'all') ? (
+          {(tempSearchQuery || tempFromDate || tempToDate || tempStatusFilter !== 'all' || tempSourceFilter !== 'all' || searchQuery || fromDate || toDate || statusFilter !== 'all' || sourceFilter !== 'all') ? (
             <Button
               variant="outline"
               onClick={handleClearFilters}
@@ -665,13 +702,29 @@ export default function AssignmentsPage() {
                     <div className="flex items-center gap-2">
                       <User className="w-4 h-4 text-gray-400" />
                       <span>{assignment.patient}</span>
+                      {assignment.source === 'patient' && (
+                        <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200">
+                          Home Visit
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
-                  <TableCell>{assignment.condition}</TableCell>
+                  <TableCell>
+                    <div>
+                      {assignment.source === 'patient' && assignment.visitAddress ? (
+                        <span className="flex items-center gap-1 text-gray-600">
+                          <Building2 className="w-4 h-4 text-gray-400" />
+                          {assignment.visitAddress}
+                        </span>
+                      ) : (
+                        <span>{assignment.condition}</span>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-gray-400" />
-                      <span>{assignment.hospital}</span>
+                      <span>{assignment.source === 'patient' ? 'Home Visit' : assignment.hospital}</span>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -766,16 +819,39 @@ export default function AssignmentsPage() {
                   <div className="space-y-1 text-sm">
                     <p><span className="text-gray-500">Name:</span> {selectedAssignment.patient}</p>
                     <p><span className="text-gray-500">Condition:</span> {selectedAssignment.condition}</p>
+                    {selectedAssignment.patientPhone && (
+                      <p><span className="text-gray-500">Phone:</span> {selectedAssignment.patientPhone}</p>
+                    )}
+                    {selectedAssignment.recipientRelationship && (
+                      <p><span className="text-gray-500">Relationship:</span> {selectedAssignment.recipientRelationship}</p>
+                    )}
                   </div>
                 </div>
 
                 <div className="p-4 bg-slate-50 rounded-lg">
                   <h3 className="text-gray-900 mb-2 flex items-center gap-2">
                     <Building2 className="w-4 h-4" />
-                    Hospital Information
+                    {selectedAssignment.source === 'patient' ? 'Visit Location' : 'Hospital Information'}
                   </h3>
                   <div className="space-y-1 text-sm">
-                    <p><span className="text-gray-500">Name:</span> {selectedAssignment.hospital}</p>
+                    {selectedAssignment.source === 'patient' ? (
+                      <>
+                        <p><span className="text-gray-500">Type:</span> Home Visit</p>
+                        {selectedAssignment.visitAddressLabel && (
+                          <p><span className="text-gray-500">Label:</span> {selectedAssignment.visitAddressLabel}</p>
+                        )}
+                        {selectedAssignment.visitAddress && (
+                          <p><span className="text-gray-500">Address:</span> {selectedAssignment.visitAddress}</p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p><span className="text-gray-500">Name:</span> {selectedAssignment.hospital}</p>
+                        {selectedAssignment.hospitalAddress && (
+                          <p><span className="text-gray-500">Address:</span> {selectedAssignment.hospitalAddress}</p>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -850,12 +926,29 @@ export default function AssignmentsPage() {
                 </Alert>
               )}
 
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-900">Consultation Fee</span>
-                  <span className="text-blue-900 font-semibold">₹{selectedAssignment.fee}</span>
+              {selectedAssignment.source === 'patient' ? (
+                <div className="p-4 bg-blue-50 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between font-semibold text-blue-900 border-b border-blue-200 pb-2">
+                    <span>Consultation Fee</span>
+                    <span>₹{selectedAssignment.fee.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-blue-700">
+                    <span>Platform Commission ({selectedAssignment.platformCommissionPercentage || 0}%)</span>
+                    <span>- ₹{(selectedAssignment.platformCommission || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-bold text-teal-800 text-sm pt-1">
+                    <span>Doctor Payout</span>
+                    <span>₹{(selectedAssignment.doctorPayout || 0).toFixed(2)}</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-4 bg-blue-50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-blue-900">Consultation Fee</span>
+                    <span className="text-blue-900 font-semibold">₹{selectedAssignment.fee}</span>
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons for Pending Assignments */}
               {selectedAssignment.status === 'pending' && (

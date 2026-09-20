@@ -7,8 +7,15 @@ import {
   subscriptions,
   supportTickets,
   auditLogs,
+  assignmentPayments,
 } from '@/src/db/drizzle/migrations/schema';
 import { eq, and, count, sql, desc } from 'drizzle-orm';
+import {
+  ASSIGNMENT_PAYMENT_SOURCES,
+  ASSIGNMENT_SETTLEMENT_STATUSES,
+  PATIENT_PAYMENT_STATUSES,
+} from '@/lib/enums/assignment-payments.enums';
+import { ASSIGNMENT_SOURCES } from '@/lib/enums/assignments.enums';
 
 export class AdminDashboardRepository {
   private db = getDb();
@@ -16,15 +23,13 @@ export class AdminDashboardRepository {
   async getStats() {
     const activeDoctorsResult = await this.db
       .select({ count: count() })
-      .from(doctors)
-      .innerJoin(users, eq(doctors.userId, users.id))
-      .where(eq(users.status, 'active'));
+      .from(users)
+      .where(and(eq(users.role, 'doctor'), eq(users.status, 'active')));
 
     const activeHospitalsResult = await this.db
       .select({ count: count() })
-      .from(hospitals)
-      .innerJoin(users, eq(hospitals.userId, users.id))
-      .where(eq(users.status, 'active'));
+      .from(users)
+      .where(and(eq(users.role, 'hospital'), eq(users.status, 'active')));
 
     const pendingDoctorVerificationsResult = await this.db
       .select({ count: count() })
@@ -36,14 +41,37 @@ export class AdminDashboardRepository {
       .from(hospitals)
       .where(eq(hospitals.licenseVerificationStatus, 'pending'));
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString();
+    const isRequestedTodayInIst = sql`DATE(${assignments.requestedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') = DATE(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')`;
 
     const todayAssignmentsResult = await this.db
       .select({ count: count() })
       .from(assignments)
-      .where(sql`DATE(${assignments.requestedAt}) = DATE(${todayStr})`);
+      .where(isRequestedTodayInIst);
+
+    const homeVisitsTodayResult = await this.db
+      .select({ count: count() })
+      .from(assignments)
+      .where(and(
+        eq(assignments.source, ASSIGNMENT_SOURCES[1]),
+        isRequestedTodayInIst,
+      ));
+
+    const homeVisitPatientPaymentsResult = await this.db
+      .select({ total: sql<string>`COALESCE(SUM(${assignmentPayments.consultationFee}), 0)` })
+      .from(assignmentPayments)
+      .where(and(
+        eq(assignmentPayments.paymentSource, ASSIGNMENT_PAYMENT_SOURCES[1]),
+        eq(assignmentPayments.patientPaymentStatus, PATIENT_PAYMENT_STATUSES[2]),
+      ));
+
+    const homeVisitPendingPayoutResult = await this.db
+      .select({ total: sql<string>`COALESCE(SUM(${assignmentPayments.doctorPayout}), 0)` })
+      .from(assignmentPayments)
+      .where(and(
+        eq(assignmentPayments.paymentSource, ASSIGNMENT_PAYMENT_SOURCES[1]),
+        eq(assignmentPayments.patientPaymentStatus, PATIENT_PAYMENT_STATUSES[2]),
+        eq(assignmentPayments.paymentStatus, ASSIGNMENT_SETTLEMENT_STATUSES[0]),
+      ));
 
     const activeSubscriptionsResult = await this.db
       .select({ count: count() })
@@ -63,6 +91,11 @@ export class AdminDashboardRepository {
       .select({ count: count() })
       .from(users)
       .where(eq(users.status, 'pending'));
+
+    const inactiveUsersResult = await this.db
+      .select({ count: count() })
+      .from(users)
+      .where(eq(users.status, 'inactive'));
 
     const suspendedUsersResult = await this.db
       .select({ count: count() })
@@ -84,6 +117,11 @@ export class AdminDashboardRepository {
       .from(users)
       .where(eq(users.role, 'admin'));
 
+    const totalPatientsResult = await this.db
+      .select({ count: count() })
+      .from(users)
+      .where(eq(users.role, 'patient'));
+
     const activeUsersResult = await this.db
       .select({ count: count() })
       .from(users)
@@ -96,14 +134,19 @@ export class AdminDashboardRepository {
         (pendingDoctorVerificationsResult[0]?.count || 0) +
         (pendingHospitalVerificationsResult[0]?.count || 0),
       todayAssignments: todayAssignmentsResult[0]?.count || 0,
+      homeVisitsToday: homeVisitsTodayResult[0]?.count || 0,
+      homeVisitPatientPaymentsCollected: Number(homeVisitPatientPaymentsResult[0]?.total || 0),
+      homeVisitPendingDoctorPayout: Number(homeVisitPendingPayoutResult[0]?.total || 0),
       activeSubscriptions: activeSubscriptionsResult[0]?.count || 0,
       openTickets: openTicketsResult[0]?.count || 0,
       totalUsers: totalUsersResult[0]?.count || 0,
       pendingUsers: pendingUsersResult[0]?.count || 0,
+      inactiveUsers: inactiveUsersResult[0]?.count || 0,
       suspendedUsers: suspendedUsersResult[0]?.count || 0,
       totalDoctors: totalDoctorsResult[0]?.count || 0,
       totalHospitals: totalHospitalsResult[0]?.count || 0,
       totalAdmins: totalAdminsResult[0]?.count || 0,
+      totalPatients: totalPatientsResult[0]?.count || 0,
       activeUsers: activeUsersResult[0]?.count || 0,
     };
   }
@@ -135,6 +178,7 @@ export class AdminDashboardRepository {
         id: assignments.id,
         status: assignments.status,
         priority: assignments.priority,
+        source: assignments.source,
         requestedAt: assignments.requestedAt,
         doctorFirstName: doctors.firstName,
         doctorLastName: doctors.lastName,
@@ -167,6 +211,7 @@ export class AdminDashboardRepository {
         s.id,
         s.status,
         s.start_date,
+        s.created_at,
         sp.name as plan_name,
         u.email as user_name
       FROM subscriptions s

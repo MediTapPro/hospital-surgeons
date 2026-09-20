@@ -5,12 +5,15 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Search, Filter, Eye, UserX, RotateCcw, Plus, Loader2, X } from 'lucide-react';
+import { Search, Plus, Loader2 } from 'lucide-react';
 import { StatusBadge } from '../StatusBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+import { UsersDataTable } from './UsersDataTable';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { USER_ACCOUNT_STATUS_ACTIONS, type UserAccountStatus } from '@/lib/enums/users.enums';
 
 interface User {
   id: string;
@@ -58,6 +61,11 @@ export function UsersManagement() {
   const [showUserDetail, setShowUserDetail] = useState(false);
   const [loadingUserDetail, setLoadingUserDetail] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [showCreateAdmin, setShowCreateAdmin] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState('');
+  const [creatingAdmin, setCreatingAdmin] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -68,7 +76,7 @@ export function UsersManagement() {
     const params = new URLSearchParams();
     if (page > 1) params.set('page', page.toString());
     if (activeTab !== 'all') {
-      params.set('role', activeTab === 'doctors' ? 'doctor' : activeTab === 'hospitals' ? 'hospital' : 'admin');
+      params.set('role', activeTab === 'doctors' ? 'doctor' : activeTab === 'hospitals' ? 'hospital' : activeTab === 'patients' ? 'patient' : 'admin');
     } else if (roleFilter !== 'all') {
       params.set('role', roleFilter);
     }
@@ -88,7 +96,7 @@ export function UsersManagement() {
       });
 
       if (activeTab !== 'all') {
-        params.append('role', activeTab === 'doctors' ? 'doctor' : activeTab === 'hospitals' ? 'hospital' : 'admin');
+        params.append('role', activeTab === 'doctors' ? 'doctor' : activeTab === 'hospitals' ? 'hospital' : activeTab === 'patients' ? 'patient' : 'admin');
       } else if (roleFilter !== 'all') {
         params.append('role', roleFilter.toLowerCase());
       }
@@ -101,8 +109,8 @@ export function UsersManagement() {
         params.append('search', searchQuery);
       }
 
-      const response = await fetch(`/api/admin/users?${params.toString()}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/users?${params.toString()}`);
+      const data = response.data;
 
       if (data.success) {
         setUsers(data.data);
@@ -121,8 +129,8 @@ export function UsersManagement() {
   const fetchUserDetail = async (userId: string) => {
     try {
       setLoadingUserDetail(true);
-      const response = await fetch(`/api/admin/users/${userId}`);
-      const data = await response.json();
+      const response = await apiClient.get(`/api/admin/users/${userId}`);
+      const data = response.data;
 
       if (data.success) {
         setSelectedUser(data.data);
@@ -141,13 +149,8 @@ export function UsersManagement() {
   const updateUserStatus = async (userId: string, newStatus: string) => {
     try {
       setUpdating(userId);
-      const response = await fetch(`/api/admin/users/${userId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/users/${userId}/status`, { status: newStatus });
+      const data = response.data;
 
       if (data.success) {
         toast.success('User status updated successfully');
@@ -169,13 +172,8 @@ export function UsersManagement() {
   const updateUserRole = async (userId: string, newRole: string) => {
     try {
       setUpdating(userId);
-      const response = await fetch(`/api/admin/users/${userId}/role`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: newRole }),
-      });
-
-      const data = await response.json();
+      const response = await apiClient.put(`/api/admin/users/${userId}/role`, { role: newRole });
+      const data = response.data;
 
       if (data.success) {
         toast.success('User role updated successfully');
@@ -194,46 +192,27 @@ export function UsersManagement() {
     }
   };
 
-  const deleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user? This will suspend the user account.')) {
+  const createAdmin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (adminPassword !== confirmAdminPassword) {
+      toast.error('Passwords do not match');
       return;
     }
-
     try {
-      setUpdating(userId);
-      const response = await fetch(`/api/admin/users/${userId}`, {
-        method: 'DELETE',
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        toast.success('User deleted successfully');
+      setCreatingAdmin(true);
+      const response = await apiClient.post('/api/admin/users/admin', { email: adminEmail, password: adminPassword });
+      if (response.data.success) {
+        toast.success('Administrator created successfully');
+        setShowCreateAdmin(false);
+        setAdminEmail('');
+        setAdminPassword('');
+        setConfirmAdminPassword('');
         fetchUsers();
-        if (showUserDetail && selectedUser?.id === userId) {
-          setShowUserDetail(false);
-        }
-      } else {
-        toast.error(data.message || 'Failed to delete user');
       }
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      toast.error('Failed to delete user');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to create administrator');
     } finally {
-      setUpdating(null);
-    }
-  };
-
-  const getRoleBadgeColor = (role: string) => {
-    switch (role.toLowerCase()) {
-      case 'doctor':
-        return 'bg-teal-100 text-teal-700';
-      case 'hospital':
-        return 'bg-navy-100 text-navy-700';
-      case 'admin':
-        return 'bg-purple-100 text-purple-700';
-      default:
-        return 'bg-slate-100 text-slate-700';
+      setCreatingAdmin(false);
     }
   };
 
@@ -248,15 +227,8 @@ export function UsersManagement() {
     });
   };
 
-  const getStatusAction = (user: User) => {
-    if (user.status === 'active') {
-      return { action: 'suspend', label: 'Suspend', newStatus: 'suspended' };
-    } else if (user.status === 'suspended') {
-      return { action: 'activate', label: 'Activate', newStatus: 'active' };
-    } else {
-      return { action: 'activate', label: 'Activate', newStatus: 'active' };
-    }
-  };
+  const getStatusAction = (user: User) =>
+    USER_ACCOUNT_STATUS_ACTIONS[user.status as UserAccountStatus] ?? USER_ACCOUNT_STATUS_ACTIONS.pending;
 
   // Use users directly from API (already filtered on backend)
   const filteredUsers = users;
@@ -267,9 +239,9 @@ export function UsersManagement() {
         title="Users Management" 
         description="Manage doctors, hospitals, and administrators"
         actions={
-          <Button className="bg-navy-600 hover:bg-navy-700">
+          <Button className="bg-navy-600 hover:bg-navy-700" onClick={() => setShowCreateAdmin(true)}>
             <Plus className="w-4 h-4 mr-2" />
-            Add User
+            Add Admin
           </Button>
         }
       />
@@ -288,6 +260,7 @@ export function UsersManagement() {
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="doctors">Doctors</TabsTrigger>
             <TabsTrigger value="hospitals">Hospitals</TabsTrigger>
+            <TabsTrigger value="patients">Patients</TabsTrigger>
             <TabsTrigger value="admins">Admins</TabsTrigger>
           </TabsList>
 
@@ -322,6 +295,7 @@ export function UsersManagement() {
                     <SelectItem value="all">All Roles</SelectItem>
                     <SelectItem value="doctor">Doctor</SelectItem>
                     <SelectItem value="hospital">Hospital</SelectItem>
+                    <SelectItem value="patient">Patient</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
@@ -337,10 +311,6 @@ export function UsersManagement() {
                     <SelectItem value="suspended">Suspended</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button variant="outline">
-                  <Filter className="w-4 h-4 mr-2" />
-                  More Filters
-                </Button>
               </div>
             </div>
 
@@ -350,100 +320,13 @@ export function UsersManagement() {
                 <p className="text-slate-600">Loading users...</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-slate-600">User</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Role</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Verification</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Subscription</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Last Login</th>
-                      <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {filteredUsers.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
-                          No users found
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredUsers.map((user, index) => {
-                        const statusAction = getStatusAction(user);
-                        return (
-                          <tr key={`${activeTab}-${user.id}-${index}`} className="hover:bg-slate-50">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
-                                  user.role === 'doctor' ? 'bg-teal-100 text-teal-700' :
-                                  user.role === 'hospital' ? 'bg-navy-100 text-navy-700' :
-                                  'bg-slate-100 text-slate-700'
-                                }`}>
-                                  {user.name.charAt(0)}
-                                </div>
-                                <div>
-                                  <div className="text-slate-900">{user.name}</div>
-                                  <div className="text-slate-500 text-sm">{user.email}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getRoleBadgeColor(user.role)}`}>
-                                {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <StatusBadge status={user.status} />
-                            </td>
-                            <td className="px-6 py-4">
-                              <StatusBadge status={user.verificationStatus} />
-                            </td>
-                            <td className="px-6 py-4 text-slate-900">
-                              {user.subscriptionPlanName || user.subscriptionTier || 'N/A'}
-                            </td>
-                            <td className="px-6 py-4 text-slate-600 text-sm">
-                              {formatDate(user.lastLoginAt)}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
-                                <Button 
-                                  size="sm" 
-                                  variant="ghost"
-                                  onClick={() => fetchUserDetail(user.id)}
-                                  disabled={loadingUserDetail}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                                {updating === user.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                                ) : (
-                                  <>
-                                    <Button 
-                                      size="sm" 
-                                      variant="ghost"
-                                      onClick={() => updateUserStatus(user.id, statusAction.newStatus)}
-                                      title={statusAction.label}
-                                    >
-                                      {user.status === 'active' ? (
-                                        <UserX className="w-4 h-4" />
-                                      ) : (
-                                        <RotateCcw className="w-4 h-4" />
-                                      )}
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <UsersDataTable
+                users={filteredUsers}
+                loadingUserDetail={loadingUserDetail}
+                updatingUserId={updating}
+                onView={fetchUserDetail}
+                onStatusChange={updateUserStatus}
+              />
             )}
 
             {/* Pagination */}
@@ -475,6 +358,21 @@ export function UsersManagement() {
           </div>
         </Tabs>
       </div>
+
+      <Dialog open={showCreateAdmin} onOpenChange={setShowCreateAdmin}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Administrator</DialogTitle>
+            <DialogDescription>Create an active administrator account. Provider verification is not required.</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={createAdmin} autoComplete="off">
+            <div className="space-y-2"><label className="text-sm font-medium text-slate-700" htmlFor="new-admin-email">Email</label><Input id="new-admin-email" name="new-admin-email" type="email" autoComplete="off" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} required /></div>
+            <div className="space-y-2"><label className="text-sm font-medium text-slate-700" htmlFor="new-admin-password">Password</label><Input id="new-admin-password" name="new-admin-password" type="password" autoComplete="new-password" minLength={8} value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} required /></div>
+            <div className="space-y-2"><label className="text-sm font-medium text-slate-700" htmlFor="confirm-new-admin-password">Confirm password</label><Input id="confirm-new-admin-password" name="confirm-new-admin-password" type="password" autoComplete="new-password" minLength={8} value={confirmAdminPassword} onChange={(event) => setConfirmAdminPassword(event.target.value)} required /></div>
+            <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="outline" onClick={() => setShowCreateAdmin(false)} disabled={creatingAdmin}>Cancel</Button><Button type="submit" disabled={creatingAdmin}>{creatingAdmin ? 'Creating...' : 'Create Admin'}</Button></div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* User Detail Modal */}
       <Dialog open={showUserDetail} onOpenChange={setShowUserDetail}>
@@ -520,6 +418,27 @@ export function UsersManagement() {
                   <p className="text-slate-900">{formatDate(selectedUser.lastLoginAt)}</p>
                 </div>
               </div>
+
+              <section className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Account access</h3>
+                  <p className="text-sm text-slate-600">
+                    {selectedUser.status === 'active'
+                      ? 'Suspend this account to prevent new portal access.'
+                      : 'Activate this account to allow portal access.'}
+                  </p>
+                </div>
+                <Button
+                  variant={selectedUser.status === 'active' ? 'outline' : 'default'}
+                  onClick={() => {
+                    const statusAction = getStatusAction(selectedUser);
+                    updateUserStatus(selectedUser.id, statusAction.nextStatus);
+                  }}
+                  disabled={updating === selectedUser.id}
+                >
+                  {updating === selectedUser.id ? 'Updating...' : getStatusAction(selectedUser).label}
+                </Button>
+              </section>
 
               {/* Profile Data */}
               {selectedUser.profileData && (
@@ -588,28 +507,6 @@ export function UsersManagement() {
                 </div>
               )}
 
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row gap-2 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    const statusAction = getStatusAction(selectedUser);
-                    updateUserStatus(selectedUser.id, statusAction.newStatus);
-                  }}
-                  disabled={updating === selectedUser.id}
-                  className="flex-1"
-                >
-                  {selectedUser.status === 'active' ? 'Suspend User' : 'Activate User'}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => deleteUser(selectedUser.id)}
-                  disabled={updating === selectedUser.id}
-                  className="flex-1"
-                >
-                  Delete User
-                </Button>
-              </div>
             </div>
           ) : null}
         </DialogContent>

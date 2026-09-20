@@ -1,117 +1,183 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { ProceduresService } from '@/lib/services/procedures.service';
 import { validateRequest } from '@/lib/utils/validate-request';
 import { UpdateProcedureDtoSchema } from '@/lib/validations/procedure.dto';
-import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/utils/audit-logger';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { PROCEDURE_ERROR_STATUS } from '@/lib/enums/procedures.enums';
+/**
+ * @swagger
+ * /api/admin/procedures/{id}:
+ *   get:
+ *     summary: Get a procedure (Admin)
+ *     tags: [Admin, Procedures]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Procedure details, including assigned procedure type IDs
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
+ *       404:
+ *         description: Procedure not found
+ *       500:
+ *         description: Internal server error
+ *
+ *   put:
+ *     summary: Update a procedure (Admin)
+ *     description: >
+ *       Update a procedure. Supplying `typeIds` replaces the procedure's pricing-type
+ *       mappings entirely.
+ *     tags: [Admin, Procedures]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               specialtyId: { type: string, format: uuid }
+ *               categoryId: { type: string, format: uuid, nullable: true }
+ *               name: { type: string }
+ *               description: { type: string }
+ *               isActive: { type: boolean }
+ *               typeIds:
+ *                 type: array
+ *                 items: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Procedure updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
+ *       404:
+ *         description: Procedure not found
+ *       409:
+ *         description: A procedure with this name already exists for this specialty
+ *       500:
+ *         description: Internal server error
+ *
+ *   delete:
+ *     summary: Delete a procedure (Admin)
+ *     description: >
+ *       Deletion is rejected while the procedure is referenced by a doctor procedure fee or an
+ *       assignment. The procedure's own procedure type mappings cascade with it and are not
+ *       treated as a blocking reference.
+ *     tags: [Admin, Procedures]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Procedure deleted successfully
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
+ *       404:
+ *         description: Procedure not found
+ *       409:
+ *         description: Cannot delete procedure as it is referenced by dependent records
+ *       500:
+ *         description: Internal server error
+ */
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function getHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id } = await context.params;
   try {
-    const service = new ProceduresService();
-    const result = await service.getProcedureById(id);
+    const result = await new ProceduresService().getProcedureById(id);
 
-    if (result.success) {
-      return NextResponse.json(result);
+    if (!result.success) {
+      return NextResponse.json(result, { status: PROCEDURE_ERROR_STATUS[result.code] ?? 404 });
     }
 
-    return NextResponse.json(result, { status: 404 });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error in GET /api/admin/procedures/[id]:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function putHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id } = await context.params;
   try {
     const validation = await validateRequest(req, UpdateProcedureDtoSchema);
     if (!validation.success) {
       return validation.response;
     }
 
-    const service = new ProceduresService();
-    
-    // Get old data for audit log
-    const oldResult = await service.getProcedures({ search: validation.data.name }); // Approximate lookup
-    // Better to have findById in Service
-    // I'll add findById to Service if needed, but for now I'll just use the Repository directly if it's easier.
-    // Actually, I'll just perform the update and log the changes.
+    const result = await new ProceduresService().updateProcedure(id, validation.data, {
+      adminUserId: req.user!.userId,
+      requestMetadata: getRequestMetadata(req),
+    });
 
-    const result = await service.updateProcedure(id, validation.data);
-
-    if (result.success) {
-      // Audit Log
-      const metadata = getRequestMetadata(req);
-      const adminUserId = req.headers.get('x-user-id') || null;
-      
-      await createAuditLog({
-        userId: adminUserId,
-        actorType: 'admin',
-        action: 'update',
-        entityType: 'procedure',
-        entityId: id,
-        entityName: result.data?.name || 'Updated Procedure',
-        httpMethod: 'PUT',
-        endpoint: `/api/admin/procedures/${id}`,
-        ipAddress: metadata.ipAddress,
-        userAgent: metadata.userAgent,
-        details: {
-          updatedAt: new Date().toISOString(),
-        },
-      });
-
-      return NextResponse.json(result);
+    if (!result.success) {
+      return NextResponse.json(result, { status: PROCEDURE_ERROR_STATUS[result.code] ?? 500 });
     }
 
-    return NextResponse.json(result, { status: 400 });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error in PUT /api/admin/procedures/[id]:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function deleteHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id } = await context.params;
   try {
-    const service = new ProceduresService();
-    const result = await service.deleteProcedure(id);
+    const result = await new ProceduresService().deleteProcedure(id, {
+      adminUserId: req.user!.userId,
+      requestMetadata: getRequestMetadata(req),
+    });
 
-    if (result.success) {
-      // Audit Log
-      const metadata = getRequestMetadata(req);
-      const adminUserId = req.headers.get('x-user-id') || null;
-      
-      await createAuditLog({
-        userId: adminUserId,
-        actorType: 'admin',
-        action: 'delete',
-        entityType: 'procedure',
-        entityId: id,
-        entityName: 'Deleted Procedure', // Can fetch name before delete if needed
-        httpMethod: 'DELETE',
-        endpoint: `/api/admin/procedures/${id}`,
-        ipAddress: metadata.ipAddress,
-        userAgent: metadata.userAgent,
-        details: {
-          deletedAt: new Date().toISOString(),
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: result.message,
+          data: 'data' in result ? result.data : undefined,
         },
-      });
-
-      return NextResponse.json(result);
+        { status: PROCEDURE_ERROR_STATUS[result.code] ?? 500 }
+      );
     }
 
-    return NextResponse.json(result, { status: 400 });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error in DELETE /api/admin/procedures/[id]:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
   }
 }
+
+export const GET = withAuthAndContext(getHandler, ['admin']);
+export const PUT = withAuthAndContext(putHandler, ['admin']);
+export const DELETE = withAuthAndContext(deleteHandler, ['admin']);

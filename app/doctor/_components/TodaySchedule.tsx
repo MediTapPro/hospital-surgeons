@@ -42,7 +42,7 @@ export function TodaySchedule() {
       const today = new Date().toISOString().split('T')[0];
 
       // Get today's availability
-      const availabilityResponse = await apiClient.get(`/api/doctors/${doctorId}/availability?slotDate=${today}`);
+      const availabilityResponse = await apiClient.get(`/api/doctors/${doctorId}/availability?date=${today}`);
       const availabilityData = availabilityResponse.data;
 
       // Get today's assignments
@@ -71,13 +71,14 @@ export function TodaySchedule() {
 
       // Add availability slots
       if (availabilityData.success && availabilityData.data) {
-        const slots = Array.isArray(availabilityData.data) ? availabilityData.data : [];
-        slots.forEach((slot: any) => {
-          if (slot.slotDate === today && slot.status === 'available') {
+        const parentSlotsData = Array.isArray(availabilityData.data) ? availabilityData.data : [];
+        parentSlotsData.forEach((item: any) => {
+          const slot = item.parentSlot;
+          if (slot && slot.slotDate === today) {
             scheduleItems.push({
-              time: slot.startTime || '8:00 AM',
+              time: slot.start || '8:00 AM',
               type: 'available',
-              duration: calculateDuration(slot.startTime, slot.endTime),
+              duration: calculateDuration(slot.start, slot.end),
               note: 'Not booked',
             });
           }

@@ -65,4 +65,4 @@ export const PATCH = withAuthAndContext(async (req: AuthenticatedRequest, contex
     console.error('PATCH bulk message status error:', error);
     return NextResponse.json({ success: false, message: 'Failed to update messages status' }, { status: 500 });
   }
-}, ['doctor', 'hospital']);
+}, ['doctor', 'hospital', 'patient']);

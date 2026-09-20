@@ -8,6 +8,8 @@ import { Users, Building2, UserCheck, ClipboardList, TrendingUp, DollarSign, Loa
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Button } from '../ui/button';
 import { StatusBadge } from '../StatusBadge';
+import { HomeVisitOverview } from '../HomeVisitOverview';
+import apiClient from '@/lib/api/httpClient';
 
 interface DashboardStats {
   activeDoctors: number;
@@ -18,6 +20,16 @@ interface DashboardStats {
   openTickets: number;
   totalUsers: number;
   pendingUsers: number;
+  inactiveUsers: number;
+  suspendedUsers: number;
+  totalDoctors: number;
+  totalHospitals: number;
+  totalAdmins: number;
+  totalPatients: number;
+  activeUsers: number;
+  homeVisitsToday: number;
+  homeVisitPatientPaymentsCollected: number;
+  homeVisitPendingDoctorPayout: number;
 }
 
 interface TrendData {
@@ -36,22 +48,15 @@ interface Activity {
   priority?: string;
 }
 
-interface Alert {
-  id: string;
-  message: string;
-  priority: 'high' | 'medium' | 'low';
-  time: string;
-  type?: string;
-  count?: number;
-}
-
 interface UserStats {
   total: number;
   doctors: number;
   hospitals: number;
+  patients: number;
   admins: number;
   active: number;
   pending: number;
+  inactive: number;
   suspended: number;
   pendingVerifications: number;
 }
@@ -62,7 +67,6 @@ export function Dashboard() {
   const [assignmentTrends, setAssignmentTrends] = useState<TrendData[]>([]);
   const [userGrowthTrends, setUserGrowthTrends] = useState<TrendData[]>([]);
   const [recentActivity, setRecentActivity] = useState<Activity[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,67 +86,42 @@ export function Dashboard() {
       setLoading(true);
       setError(null);
 
-      // Fetch all data in parallel
-      const [statsRes, trendsRes, activityRes, usersRes] = await Promise.all([
-        fetch('/api/admin/dashboard/stats'),
-        fetch('/api/admin/dashboard/trends?months=6'),
-        fetch('/api/admin/dashboard/recent-activity?limit=10'),
-        // fetch('/api/admin/dashboard/alerts'), // COMMENTED OUT
-        fetch('/api/admin/users?limit=100'), // Get user counts
+      const [statsResponse, trendsResponse, activityResponse] = await Promise.all([
+        apiClient.get('/api/admin/dashboard/stats'),
+        apiClient.get('/api/admin/dashboard/trends?months=6'),
+        apiClient.get('/api/admin/dashboard/recent-activity?limit=10'),
       ]);
 
-      // Handle stats
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        if (statsData.success) {
-          setStats(statsData.data);
-        }
+      const statsData = statsResponse.data;
+      if (!statsData.success) {
+        throw new Error(statsData.message || 'Unable to load dashboard statistics.');
       }
+      setStats(statsData.data);
+      setUserStats({
+        total: statsData.data.totalUsers,
+        doctors: statsData.data.totalDoctors,
+        hospitals: statsData.data.totalHospitals,
+        patients: statsData.data.totalPatients,
+        admins: statsData.data.totalAdmins,
+        active: statsData.data.activeUsers,
+        pending: statsData.data.pendingUsers,
+        inactive: statsData.data.inactiveUsers,
+        suspended: statsData.data.suspendedUsers,
+        pendingVerifications: statsData.data.pendingVerifications,
+      });
 
-      // Handle trends
-      if (trendsRes.ok) {
-        const trendsData = await trendsRes.json();
-        if (trendsData.success) {
-          setAssignmentTrends(trendsData.data.assignmentTrends || []);
-          setUserGrowthTrends(trendsData.data.userGrowthTrends || []);
-        }
+      const trendsData = trendsResponse.data;
+      if (!trendsData.success) {
+        throw new Error(trendsData.message || 'Unable to load dashboard trends.');
       }
+      setAssignmentTrends(trendsData.data.assignmentTrends || []);
+      setUserGrowthTrends(trendsData.data.userGrowthTrends || []);
 
-      // Handle recent activity
-      if (activityRes.ok) {
-        const activityData = await activityRes.json();
-        if (activityData.success) {
-          setRecentActivity(activityData.data || []);
-        }
+      const activityData = activityResponse.data;
+      if (!activityData.success) {
+        throw new Error(activityData.message || 'Unable to load recent activity.');
       }
-
-      // Handle alerts - COMMENTED OUT
-      // if (alertsRes.ok) {
-      //   const alertsData = await alertsRes.json();
-      //   if (alertsData.success) {
-      //     setAlerts(alertsData.data || []);
-      //   }
-      // }
-
-      // Handle user stats
-      if (usersRes.ok) {
-        const usersData = await usersRes.json();
-        if (usersData.success) {
-          const users = usersData.data || [];
-          const pagination = usersData.pagination || {};
-          const userStatsData: UserStats = {
-            total: pagination.total || users.length,
-            doctors: users.filter((u: any) => u.role.toLowerCase() === 'doctor').length,
-            hospitals: users.filter((u: any) => u.role.toLowerCase() === 'hospital').length,
-            admins: users.filter((u: any) => u.role.toLowerCase() === 'admin').length,
-            active: users.filter((u: any) => u.status.toLowerCase() === 'active').length,
-            pending: users.filter((u: any) => u.status.toLowerCase() === 'pending').length,
-            suspended: users.filter((u: any) => u.status.toLowerCase() === 'suspended').length,
-            pendingVerifications: users.filter((u: any) => u.verificationStatus && u.verificationStatus.toLowerCase() === 'pending').length,
-          };
-          setUserStats(userStatsData);
-        }
-      }
+      setRecentActivity(activityData.data || []);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data. Please try again.');
@@ -182,9 +161,6 @@ export function Dashboard() {
             <Button variant="outline" onClick={fetchDashboardData}>
               Refresh
             </Button>
-            <Button className="bg-navy-600 hover:bg-navy-700">
-              Quick Actions
-            </Button>
             <Button variant="outline" onClick={handleLogout} className="text-red-600 hover:text-red-700 hover:bg-red-50">
               <LogOut className="w-4 h-4" />
               Logout
@@ -221,6 +197,14 @@ export function Dashboard() {
             trend={{ value: "Today", isPositive: true }}
           />
         </div>
+
+        {stats && (
+          <HomeVisitOverview
+            homeVisitsToday={stats.homeVisitsToday}
+            patientPaymentsCollected={stats.homeVisitPatientPaymentsCollected}
+            pendingDoctorPayout={stats.homeVisitPendingDoctorPayout}
+          />
+        )}
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -316,53 +300,14 @@ export function Dashboard() {
               )}
             </div>
           </div>
-
-          {/* Alerts section - COMMENTED OUT */}
-          {/* <div className="bg-white rounded-lg shadow">
-            <div className="p-6 border-b border-slate-200">
-              <h3 className="text-slate-900">Alerts</h3>
-              <p className="text-slate-600 mt-1">Critical notifications</p>
-            </div>
-            <div className="p-6">
-              {alerts.length > 0 ? (
-                <div className="space-y-4">
-                  {alerts.map((alert) => (
-                    <div key={alert.id} className={`p-3 rounded-lg border ${
-                      alert.priority === 'high' 
-                        ? 'bg-red-50 border-red-200' 
-                        : alert.priority === 'medium'
-                        ? 'bg-amber-50 border-amber-200'
-                        : 'bg-blue-50 border-blue-200'
-                    }`}>
-                      <div className="flex items-start gap-2">
-                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                          alert.priority === 'high' ? 'bg-red-600' : 
-                          alert.priority === 'medium' ? 'bg-amber-600' : 'bg-blue-600'
-                        }`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-slate-900">{alert.message}</p>
-                          <p className="text-slate-600 mt-1">{alert.time}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-slate-500">
-                  No alerts at this time
-                </div>
-              )}
-            </div>
-          </div> */}
         </div>
 
-        {/* Users Overview Widget */}
         {userStats && (
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-slate-900">Users Overview</h3>
-                <p className="text-slate-600 mt-1">Manage all users, doctors, and hospitals</p>
+                <p className="text-slate-600 mt-1">Manage platform accounts across doctors, hospitals, patients, and admins.</p>
               </div>
               <Button 
                 variant="outline" 
@@ -373,7 +318,7 @@ export function Dashboard() {
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
               <div className="p-4 bg-teal-50 rounded-lg">
                 <div className="text-sm text-slate-600 mb-1">Total Users</div>
                 <div className="text-2xl font-bold text-slate-900">{userStats.total}</div>
@@ -387,12 +332,16 @@ export function Dashboard() {
                 <div className="text-2xl font-bold text-slate-900">{userStats.hospitals}</div>
               </div>
               <div className="p-4 bg-amber-50 rounded-lg">
-                <div className="text-sm text-slate-600 mb-1">Pending Verifications</div>
-                <div className="text-2xl font-bold text-amber-600">{userStats.pendingVerifications}</div>
+                <div className="text-sm text-slate-600 mb-1">Patients</div>
+                <div className="text-2xl font-bold text-amber-600">{userStats.patients}</div>
+              </div>
+              <div className="p-4 bg-violet-50 rounded-lg">
+                <div className="text-sm text-slate-600 mb-1">Admins</div>
+                <div className="text-2xl font-bold text-violet-700">{userStats.admins}</div>
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-200">
-              <div className="grid grid-cols-3 gap-4 text-sm">
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
                 <div>
                   <span className="text-slate-600">Active: </span>
                   <span className="font-semibold text-green-600">{userStats.active}</span>
@@ -402,8 +351,16 @@ export function Dashboard() {
                   <span className="font-semibold text-amber-600">{userStats.pending}</span>
                 </div>
                 <div>
+                  <span className="text-slate-600">Inactive: </span>
+                  <span className="font-semibold text-slate-600">{userStats.inactive}</span>
+                </div>
+                <div>
                   <span className="text-slate-600">Suspended: </span>
                   <span className="font-semibold text-red-600">{userStats.suspended}</span>
+                </div>
+                <div>
+                  <span className="text-slate-600">Pending verifications: </span>
+                  <span className="font-semibold text-amber-600">{userStats.pendingVerifications}</span>
                 </div>
               </div>
             </div>

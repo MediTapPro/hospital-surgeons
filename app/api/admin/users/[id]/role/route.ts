@@ -1,115 +1,71 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { users } from '@/src/db/drizzle/migrations/schema';
-import { eq } from 'drizzle-orm';
-import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/utils/audit-logger';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { ADMIN_MANAGEABLE_USER_ROLES, isAdminManageableUserRole } from '@/lib/enums/users.enums';
+import { AdminUsersService } from '@/lib/services/admin-users.service';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const db = getDb();
-    const { id } = await params;
-    const userId = id;
-    const body = await req.json();
-    const { role } = body;
-
-    // Validate role
-    const validRoles = ['doctor', 'hospital', 'admin'];
-    if (!role || !validRoles.includes(role)) {
-      return NextResponse.json(
-        { success: false, message: 'Invalid role. Must be one of: ' + validRoles.join(', ') },
-        { status: 400 }
-      );
-    }
-
-    // Check if user exists
-    const existingUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (existingUser.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    // Prevent changing admin role (security measure)
-    if (existingUser[0].role === 'admin' && role !== 'admin') {
-      return NextResponse.json(
-        { success: false, message: 'Cannot change admin role' },
-        { status: 403 }
-      );
-    }
-
-    const oldUser = existingUser[0];
-
-    // Update user role
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        role: role,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(users.id, userId))
-      .returning();
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Build changes object
-    const changes = buildChangesObject(
-      { role: oldUser.role },
-      { role: updatedUser.role },
-      ['role']
+/**
+ * @swagger
+ * /api/admin/users/{id}/role:
+ *   put:
+ *     summary: Update a user's role (Admin only)
+ *     description: Updates the user role and audit event atomically. Existing admin accounts and the current admin's own role are protected.
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [role]
+ *             properties:
+ *               role: { type: string, enum: [doctor, hospital, admin] }
+ *               reason: { type: string }
+ *     responses:
+ *       200: { description: User role updated }
+ *       400: { description: Invalid role }
+ *       403: { description: Admin access required or protected account }
+ *       404: { description: User not found }
+ */
+async function putHandler(req: AuthenticatedRequest, context: { params: Promise<{ id: string }> }) {
+  const body = await req.json();
+  if (!isAdminManageableUserRole(body.role)) {
+    return NextResponse.json(
+      { success: false, message: `Invalid role. Must be one of: ${ADMIN_MANAGEABLE_USER_ROLES.join(', ')}` },
+      { status: 400 },
     );
+  }
 
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'update_role',
-      entityType: 'user',
-      entityId: userId,
-      entityName: oldUser.email,
-      httpMethod: 'PUT',
-      endpoint: `/api/admin/users/${userId}/role`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      changes: changes,
-      reason: body.reason || 'Role updated by admin',
-      details: {
-        previousRole: oldUser.role,
-        newRole: updatedUser.role,
-        userRole: oldUser.role,
-        updatedAt: new Date().toISOString(),
-      },
+  const { id } = await context.params;
+  try {
+    const result = await new AdminUsersService().updateUserRole({
+      targetUserId: id,
+      adminUserId: req.user!.userId,
+      role: body.role,
+      reason: typeof body.reason === 'string' ? body.reason : undefined,
+      requestMetadata: getRequestMetadata(req),
     });
-
+    if (!result.success) {
+      const status = result.code === 'NOT_FOUND' ? 404 : 403;
+      const message = result.code === 'NOT_FOUND'
+        ? 'User not found'
+        : result.code === 'ADMIN_ROLE_PROTECTED'
+          ? 'Cannot change admin role'
+          : 'You cannot change your own role';
+      return NextResponse.json({ success: false, message }, { status });
+    }
     return NextResponse.json({
       success: true,
-      message: 'User role updated successfully',
-      data: {
-        id: updatedUser.id,
-        role: updatedUser.role,
-      },
+      message: result.unchanged ? 'User role is already up to date' : 'User role updated successfully',
+      data: result.data,
     });
   } catch (error) {
     console.error('Error updating user role:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to update user role',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: 'Failed to update user role' }, { status: 500 });
   }
 }
 
-
+export const PUT = withAuthAndContext(putHandler, ['admin']);

@@ -177,6 +177,7 @@ export async function generateAvailabilityFromTemplates(
         endTime: template.endTime,
         templateId: template.id,
         status: 'available',
+        slotType: (template.slotType || 'hospital') as 'hospital' | 'home_visit',
         isManual: false,
         notes: `Auto-generated from template ${template.templateName}`,
         parentSlotId: null, // Parent slots have NULL parentSlotId

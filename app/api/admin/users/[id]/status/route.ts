@@ -1,111 +1,72 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { users } from '@/src/db/drizzle/migrations/schema';
-import { eq } from 'drizzle-orm';
-import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/utils/audit-logger';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { isUserAccountStatus, USER_ACCOUNT_STATUSES } from '@/lib/enums/users.enums';
+import { AdminUsersService } from '@/lib/services/admin-users.service';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+/**
+ * @swagger
+ * /api/admin/users/{id}/status:
+ *   put:
+ *     summary: Update a user's account access status (Admin only)
+ *     description: Updates the user's lifecycle status and writes its audit event atomically. An admin cannot change their own account status.
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status: { type: string, enum: [active, inactive, pending, suspended] }
+ *               reason: { type: string }
+ *     responses:
+ *       200: { description: Account status updated }
+ *       400: { description: Invalid account status }
+ *       403: { description: Admin access required or self-update is not allowed }
+ *       404: { description: User not found }
+ */
+async function putHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> },
 ) {
-  try {
-    const db = getDb();
-    const { id } = await params;
-    const userId = id;
-    const body = await req.json();
-    const { status } = body;
-
-    // Validate status
-    const validStatuses = ['active', 'inactive', 'pending', 'suspended'];
-    if (!status || !validStatuses.includes(status)) {
-      return NextResponse.json(
-        { success: false, message: 'Invalid status. Must be one of: ' + validStatuses.join(', ') },
-        { status: 400 }
-      );
-    }
-
-    // Check if user exists
-    const existingUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (existingUser.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    const oldUser = existingUser[0];
-    const previousStatus = oldUser.status;
-
-    // Update user status
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        status: status,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(users.id, userId))
-      .returning();
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    
-    // Get admin user ID from request (adjust based on your auth setup)
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Build changes object
-    const changes = buildChangesObject(
-      { status: previousStatus },
-      { status: status },
-      ['status']
-    );
-
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'update_status',
-      entityType: 'user',
-      entityId: userId,
-      entityName: oldUser.email,
-      httpMethod: 'PUT',
-      endpoint: `/api/admin/users/${userId}/status`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      previousStatus: previousStatus,
-      newStatus: status,
-      changes: changes,
-      reason: body.reason || 'Status updated by admin',
-      details: {
-        userRole: oldUser.role,
-        userEmail: oldUser.email,
-        updatedAt: new Date().toISOString(),
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'User status updated successfully',
-      data: {
-        id: updatedUser.id,
-        status: updatedUser.status,
-      },
-    });
-  } catch (error) {
-    console.error('Error updating user status:', error);
+  const body = await req.json();
+  if (!isUserAccountStatus(body.status)) {
     return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to update user status',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
+      { success: false, message: `Invalid status. Must be one of: ${USER_ACCOUNT_STATUSES.join(', ')}` },
+      { status: 400 },
     );
   }
+
+  const { id } = await context.params;
+  const result = await new AdminUsersService().updateAccountStatus({
+    targetUserId: id,
+    adminUserId: req.user!.userId,
+    status: body.status,
+    reason: typeof body.reason === 'string' ? body.reason : undefined,
+    requestMetadata: getRequestMetadata(req),
+  });
+
+  if (!result.success) {
+    const responseStatus = result.code === 'NOT_FOUND' ? 404 : 403;
+    const message = result.code === 'NOT_FOUND'
+      ? 'User not found'
+      : 'You cannot change your own account status';
+    return NextResponse.json({ success: false, message }, { status: responseStatus });
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: result.unchanged ? 'User status is already up to date' : 'User status updated successfully',
+    data: result.data,
+  });
 }
 
-
+export const PUT = withAuthAndContext(putHandler, ['admin']);

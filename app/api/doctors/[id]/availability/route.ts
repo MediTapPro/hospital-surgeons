@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DoctorsService } from '@/lib/services/doctors.service';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 import { doctorAvailability } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, isNull, asc } from 'drizzle-orm';
+import { eq, and, isNull, asc, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 
 /**
@@ -19,6 +19,23 @@ import { getDb } from '@/lib/db';
  *           type: string
  *           format: uuid
  *         description: Doctor ID
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Optional date filter (YYYY-MM-DD)
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [hospital, home_visit]
+ *         description: Optional slot type filter
+ *       - in: query
+ *         name: allSlots
+ *         schema:
+ *           type: boolean
+ *         description: Return all slots (parent + sub-slots) in flat format
  *     responses:
  *       200:
  *         description: Availability slots retrieved successfully
@@ -52,6 +69,12 @@ import { getDb } from '@/lib/db';
  *                       status:
  *                         type: string
  *                         enum: [available, booked, blocked]
+ *                       slotType:
+ *                         type: string
+ *                         enum: [hospital, home_visit]
+ *                       type:
+ *                         type: string
+ *                         enum: [hospital, home_visit]
  *                       isManual:
  *                         type: boolean
  *       400:
@@ -97,6 +120,10 @@ import { getDb } from '@/lib/db';
  *                 type: string
  *                 enum: [available, booked, blocked]
  *                 default: available
+ *               slotType:
+ *                 type: string
+ *                 enum: [hospital, home_visit]
+ *                 default: hospital
  *               isManual:
  *                 type: boolean
  *                 default: false
@@ -114,15 +141,22 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ id: str
   try {
     const params = await context.params;
     const { searchParams } = new URL(req.url);
-    const date = searchParams.get('date'); // Optional date filter
-    const allSlots = searchParams.get('allSlots') === 'true'; // Return all slots (parent + sub-slots) in flat format
+    const date = searchParams.get('date');
+    const type = searchParams.get('type') || searchParams.get('slotType');
+    const allSlots = searchParams.get('allSlots') === 'true';
+    const pageParam = searchParams.get('page');
+    const limitParam = searchParams.get('limit');
+
+    const shouldPaginate = pageParam !== null || limitParam !== null;
+    const page = pageParam ? Math.max(1, parseInt(pageParam, 10)) : 1;
+    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10)) : 10;
+    const offset = (page - 1) * limit;
 
     const { DoctorsRepository } = await import('@/lib/repositories/doctors.repository');
     const doctorsRepository = new DoctorsRepository();
     const db = getDb();
 
     if (allSlots) {
-      // Return all slots in flat format (for doctor's schedule page)
       const conditions = [
         eq(doctorAvailability.doctorId, params.id)
       ];
@@ -131,51 +165,105 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ id: str
         conditions.push(eq(doctorAvailability.slotDate, date));
       }
 
-      const allSlotsResult = await db
-        .select()
-        .from(doctorAvailability)
-        .where(and(...conditions))
-        .orderBy(asc(doctorAvailability.slotDate), asc(doctorAvailability.startTime));
+      if (type) {
+        conditions.push(eq(doctorAvailability.slotType, type));
+      }
+
+      let allSlotsResult: any[];
+      let total = 0;
+      if (shouldPaginate) {
+        const countResult = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(doctorAvailability)
+          .where(and(...conditions));
+        total = Number(countResult[0]?.count || 0);
+
+        allSlotsResult = await db
+          .select()
+          .from(doctorAvailability)
+          .where(and(...conditions))
+          .orderBy(asc(doctorAvailability.slotDate), asc(doctorAvailability.startTime))
+          .limit(limit)
+          .offset(offset);
+      } else {
+        allSlotsResult = await db
+          .select()
+          .from(doctorAvailability)
+          .where(and(...conditions))
+          .orderBy(asc(doctorAvailability.slotDate), asc(doctorAvailability.startTime));
+      }
+
+      const formattedAllSlots = allSlotsResult.map((slot: any) => ({
+        ...slot,
+        type: slot.slotType,
+      }));
 
       return NextResponse.json(
         {
           success: true,
-          data: allSlotsResult,
+          data: formattedAllSlots,
+          ...(shouldPaginate && {
+            pagination: {
+              page,
+              limit,
+              total,
+              totalPages: Math.ceil(total / limit),
+            }
+          })
         },
         { status: 200 }
       );
     }
 
-    // Default: Return parent slots with booked sub-slots (for hospital find-doctors)
     const conditions = [
       eq(doctorAvailability.doctorId, params.id),
-      isNull(doctorAvailability.parentSlotId) // Only parent slots
+      isNull(doctorAvailability.parentSlotId)
     ];
 
-    // If date is provided, filter by date
     if (date) {
       conditions.push(eq(doctorAvailability.slotDate, date));
     }
 
-    // Fetch parent slots
-    const parentSlots = await db
-      .select()
-      .from(doctorAvailability)
-      .where(and(...conditions))
-      .orderBy(asc(doctorAvailability.startTime));
+    if (type) {
+      conditions.push(eq(doctorAvailability.slotType, type));
+    }
 
-    // For each parent slot, fetch its booked sub-slots
+    let parentSlots: any[];
+    let total = 0;
+    if (shouldPaginate) {
+      const countResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(doctorAvailability)
+        .where(and(...conditions));
+      total = Number(countResult[0]?.count || 0);
+
+      parentSlots = await db
+        .select()
+        .from(doctorAvailability)
+        .where(and(...conditions))
+        .orderBy(asc(doctorAvailability.startTime))
+        .limit(limit)
+        .offset(offset);
+    } else {
+      parentSlots = await db
+        .select()
+        .from(doctorAvailability)
+        .where(and(...conditions))
+        .orderBy(asc(doctorAvailability.startTime));
+    }
+
     const result = await Promise.all(
       parentSlots.map(async (parentSlot) => {
         const subSlots = await doctorsRepository.getSubSlotsByParent(parentSlot.id);
         
-        // Filter only booked sub-slots
         const bookedSubslots = subSlots
           .filter((subSlot: any) => subSlot.status === 'booked')
           .map((subSlot: any) => ({
             id: subSlot.id,
             start: subSlot.startTime,
             end: subSlot.endTime,
+            slotType: subSlot.slotType,
+            type: subSlot.slotType,
           }));
 
         return {
@@ -184,6 +272,8 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ id: str
             start: parentSlot.startTime,
             end: parentSlot.endTime,
             slotDate: parentSlot.slotDate,
+            slotType: parentSlot.slotType,
+            type: parentSlot.slotType,
           },
           bookedSubslots,
         };
@@ -194,6 +284,14 @@ async function getHandler(req: NextRequest, context: { params: Promise<{ id: str
       {
         success: true,
         data: result,
+        ...(shouldPaginate && {
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+          }
+        })
       },
       { status: 200 }
     );

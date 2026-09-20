@@ -53,6 +53,7 @@ export interface CreateDoctorAvailabilityData {
   endTime: string;
   templateId?: string;
   status?: string;
+  slotType?: 'hospital' | 'home_visit';
   isManual?: boolean;
   notes?: string;
   parentSlotId?: string | null; // NULL for parent slots, UUID for sub-slots
@@ -73,6 +74,7 @@ export interface CreateAvailabilityTemplateData {
   recurrenceDays?: string[];
   validFrom: string;
   validUntil?: string;
+  slotType?: 'hospital' | 'home_visit';
 }
 
 export type UpdateAvailabilityTemplateData = Partial<CreateAvailabilityTemplateData>;
@@ -545,6 +547,7 @@ export class DoctorsRepository {
         recurrenceDays: templateData.recurrenceDays?.length ? templateData.recurrenceDays.join(',') : null,
         validFrom: templateData.validFrom,
         validUntil: templateData.validUntil ?? null,
+        slotType: templateData.slotType || 'hospital',
       })
       .returning();
 
@@ -585,6 +588,7 @@ export class DoctorsRepository {
     }
     if (updateData.validFrom !== undefined) updateFields.validFrom = updateData.validFrom;
     if (updateData.validUntil !== undefined) updateFields.validUntil = updateData.validUntil ?? null;
+    if (updateData.slotType !== undefined) updateFields.slotType = updateData.slotType;
 
     const [template] = await this.db
       .update(availabilityTemplates)
@@ -638,6 +642,7 @@ export class DoctorsRepository {
         endTime: availabilityData.endTime,
         templateId: availabilityData.templateId,
         status: availabilityData.status || 'available',
+        slotType: availabilityData.slotType || 'hospital',
         isManual: availabilityData.isManual ?? false,
         notes: availabilityData.notes,
         parentSlotId: availabilityData.parentSlotId ?? null, // NULL for parent slots
@@ -810,6 +815,23 @@ export class DoctorsRepository {
       .from(doctorAvailability)
       .where(eq(doctorAvailability.parentSlotId, parentSlotId))
       .orderBy(asc(doctorAvailability.startTime));
+  }
+
+  /**
+   * Check if a slot has any booked child slots (for parent slots)
+   */
+  async hasBookedChildSlots(slotId: string): Promise<boolean> {
+    const [result] = await this.db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(doctorAvailability)
+      .where(
+        and(
+          eq(doctorAvailability.parentSlotId, slotId),
+          eq(doctorAvailability.status, 'booked')
+        )
+      );
+
+    return Number(result?.count || 0) > 0;
   }
 
   /**

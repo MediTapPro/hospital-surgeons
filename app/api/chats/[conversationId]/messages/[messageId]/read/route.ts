@@ -53,5 +53,5 @@ export const PATCH = withAuthAndContext<Params>(
       return NextResponse.json({ success: false, message: 'Failed to mark message as read' }, { status: 500 });
     }
   },
-  ['doctor', 'hospital']
+  ['doctor', 'hospital', 'patient']
 );

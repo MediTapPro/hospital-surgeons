@@ -1,11 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { assignments, doctorAvailability, enumStatus } from '@/src/db/drizzle/migrations/schema';
+import { assignmentPayments, assignments, doctorAvailability, enumStatus, homeVisitDetails, patientProfiles } from '@/src/db/drizzle/migrations/schema';
 import { eq, and } from 'drizzle-orm';
 import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
 import { UpdateAssignmentStatusDtoSchema } from '@/lib/validations/assignment-status.dto';
 import { validateRequest } from '@/lib/utils/validate-request';
+import { HomeVisitSettingsService } from '@/lib/services/home-visit-settings.service';
 
+/**
+ * @swagger
+ * /api/assignments/{id}/status:
+ *   patch:
+ *     summary: Update an assignment status
+ *     description: Updates the assignment and any related slot or payment record atomically. Completing a paid home visit creates its pending patient-payment settlement from the booking-time fee snapshot; complimentary visits do not create a settlement.
+ *     tags: [Assignments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status: { type: string, enum: [accepted, declined, completed, cancelled] }
+ *               cancellationReason: { type: string }
+ *               treatmentNotes: { type: string }
+ *     responses:
+ *       200: { description: Assignment updated successfully }
+ *       400: { description: Invalid status transition or booking rule }
+ *       403: { description: Permission denied }
+ *       404: { description: Assignment not found }
+ *       500: { description: Unable to update assignment }
+ */
 /**
  * Update assignment status
  * PATCH /api/assignments/[id]/status
@@ -80,6 +113,31 @@ async function patchHandler(
           { status: 403 }
         );
       }
+    } else if (user.userRole === 'patient') {
+      // Patients are only allowed to cancel their assignments
+      if (status !== 'cancelled') {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'Patients are only permitted to cancel assignments.',
+          },
+          { status: 403 }
+        );
+      }
+
+      const { PatientProfilesRepository } = await import('@/lib/repositories/patient-profiles.repository');
+      const patientProfilesRepo = new PatientProfilesRepository();
+      const patientProfile = await patientProfilesRepo.findProfileByUserId(user.userId);
+
+      if (!patientProfile || patientProfile.id !== assignmentData.patientProfileId) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'You do not have permission to update this assignment',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     // Check if assignment is already in a final state
@@ -108,6 +166,11 @@ async function patchHandler(
 
     // Only allow 'completed' status if current time is after the scheduled start time
     if (status === 'completed' && assignmentData.availabilitySlotId) {
+      const completionSettings = await new HomeVisitSettingsService().getSettings();
+      const allowEarlyAssignmentCompletion = completionSettings.success
+        && completionSettings.data?.allowEarlyAssignmentCompletion === true;
+
+      if (!allowEarlyAssignmentCompletion) {
       const slotInfo = await db
         .select({
           slotDate: doctorAvailability.slotDate,
@@ -146,6 +209,7 @@ async function patchHandler(
           );
         }
       }
+      }
     }
 
     // Only allow 'cancelled' status if assignment is 'pending' or 'accepted'
@@ -162,7 +226,8 @@ async function patchHandler(
     // Check configurable cancellation notice period for assignments with booked slots
     // Apply to both 'pending' and 'accepted' assignments that have an availabilitySlotId
     if (status === 'cancelled' && assignmentData.availabilitySlotId &&
-      (assignmentData.status === 'pending' || assignmentData.status === 'accepted')) {
+      (assignmentData.status === 'pending' || assignmentData.status === 'accepted') &&
+      assignmentData.hospitalId) {
       // Fetch hospital preferences to get the cancellation notice period (in days)
       const { hospitalPreferences } = await import('@/src/db/drizzle/migrations/schema');
       const preferences = await db
@@ -236,22 +301,6 @@ async function patchHandler(
       }
     }
 
-    // Verify status exists in enum_status table, insert if it doesn't
-    const statusCheck = await db
-      .select()
-      .from(enumStatus)
-      .where(eq(enumStatus.status, status))
-      .limit(1);
-
-    if (statusCheck.length === 0) {
-      // Insert status if it doesn't exist
-      await db.insert(enumStatus).values({
-        status,
-        description: `${status} assignment status`,
-      }).onConflictDoNothing();
-    }
-
-    // Update assignment status
     const updateData: any = {
       status,
     };
@@ -267,7 +316,7 @@ async function patchHandler(
     } else if (status === 'cancelled') {
       updateData.cancelledAt = new Date().toISOString();
       // Set cancelledBy based on user role
-      updateData.cancelledBy = user.userRole === 'hospital' ? 'hospital' : 'doctor';
+      updateData.cancelledBy = user.userRole === 'hospital' ? 'hospital' : user.userRole === 'patient' ? 'patient' : 'doctor';
       if (cancellationReason) {
         updateData.cancellationReason = cancellationReason;
       }
@@ -279,82 +328,83 @@ async function patchHandler(
       }
     }
 
-    const updatedAssignment = await db
-      .update(assignments)
-      .set(updateData)
-      .where(eq(assignments.id, assignmentId))
-      .returning();
+    let updatedAssignment: typeof assignmentData;
 
-    // Automatically create payment record when assignment is completed
-    if (status === 'completed' && assignmentData.consultationFee) {
-      const { assignmentPayments } = await import('@/src/db/drizzle/migrations/schema');
+    await db.transaction(async (tx) => {
+      await tx.insert(enumStatus).values({
+        status,
+        description: `${status} assignment status`,
+      }).onConflictDoNothing();
 
-      // Check if payment already exists (prevent duplicates)
-      const existingPayment = await db
-        .select()
-        .from(assignmentPayments)
-        .where(eq(assignmentPayments.assignmentId, assignmentId))
-        .limit(1);
+      const [updated] = await tx
+        .update(assignments)
+        .set(updateData)
+        .where(eq(assignments.id, assignmentId))
+        .returning();
 
-      if (existingPayment.length === 0) {
-        // Create payment record (no commission: doctorPayout = consultationFee)
-        const consultationFee = parseFloat(assignmentData.consultationFee.toString());
-        const platformCommission = 0; // No commission for now
-        const doctorPayout = consultationFee; // Full amount to doctor
+      if (!updated) {
+        throw new Error('ASSIGNMENT_UPDATE_FAILED');
+      }
+      updatedAssignment = updated;
 
-        try {
-          await db.insert(assignmentPayments).values({
-            assignmentId: assignmentId,
+      if (status === 'completed' && assignmentData.consultationFee) {
+        if (assignmentData.source === 'patient') {
+          const [homeVisit] = await tx
+            .select({
+              isFreeTrial: homeVisitDetails.isFreeTrial,
+              paymentMode: homeVisitDetails.paymentMode,
+              platformCommission: homeVisitDetails.platformCommission,
+              doctorPayout: homeVisitDetails.doctorPayout,
+            })
+            .from(homeVisitDetails)
+            .where(eq(homeVisitDetails.assignmentId, assignmentId))
+            .limit(1);
+
+          if (homeVisit && !homeVisit.isFreeTrial && homeVisit.paymentMode === 'pay_after_completion') {
+            await tx.insert(assignmentPayments).values({
+              assignmentId,
+              doctorId: assignmentData.doctorId,
+              consultationFee: assignmentData.consultationFee.toString(),
+              platformCommission: homeVisit.platformCommission,
+              doctorPayout: homeVisit.doctorPayout,
+              paymentSource: 'home_visit',
+              patientPaymentStatus: 'pending',
+              paymentStatus: 'processing',
+            }).onConflictDoNothing();
+          }
+        } else if (assignmentData.hospitalId) {
+          const consultationFee = assignmentData.consultationFee.toString();
+          await tx.insert(assignmentPayments).values({
+            assignmentId,
             hospitalId: assignmentData.hospitalId,
             doctorId: assignmentData.doctorId,
-            consultationFee: consultationFee.toString(),
-            platformCommission: platformCommission.toString(),
-            doctorPayout: doctorPayout.toString(),
+            consultationFee,
+            platformCommission: '0.00',
+            doctorPayout: consultationFee,
+            paymentSource: 'hospital_assignment',
+            patientPaymentStatus: 'not_applicable',
             paymentStatus: 'pending',
-          });
-        } catch (error: any) {
-          // Ignore duplicate key errors (payment already exists)
-          // This can happen if the assignment was completed multiple times
-          if (error?.code !== '23505') { // PostgreSQL unique violation
-            throw error;
-          }
+          }).onConflictDoNothing();
         }
       }
-    }
 
-    // Release or delete availability slot for declined or cancelled assignments
-    if ((status === 'declined' || status === 'cancelled') && assignmentData.availabilitySlotId) {
-      // Check if this is a sub-slot (has parentSlotId) or a parent slot
-      const slotInfo = await db
-        .select({
-          id: doctorAvailability.id,
-          parentSlotId: doctorAvailability.parentSlotId,
-        })
-        .from(doctorAvailability)
-        .where(eq(doctorAvailability.id, assignmentData.availabilitySlotId))
-        .limit(1);
+      if ((status === 'declined' || status === 'cancelled') && assignmentData.availabilitySlotId) {
+        const [slot] = await tx
+          .select({ parentSlotId: doctorAvailability.parentSlotId })
+          .from(doctorAvailability)
+          .where(eq(doctorAvailability.id, assignmentData.availabilitySlotId))
+          .limit(1);
 
-      if (slotInfo.length > 0) {
-        const slot = slotInfo[0];
-
-        if (slot.parentSlotId) {
-          // This is a sub-slot: delete it
-          await db
-            .delete(doctorAvailability)
-            .where(eq(doctorAvailability.id, assignmentData.availabilitySlotId));
-        } else {
-          // This is a parent slot: just release it (set to available)
-          await db
+        if (slot?.parentSlotId) {
+          await tx.delete(doctorAvailability).where(eq(doctorAvailability.id, assignmentData.availabilitySlotId));
+        } else if (slot) {
+          await tx
             .update(doctorAvailability)
-            .set({
-              status: 'available',
-              bookedByHospitalId: null,
-              bookedAt: null,
-            })
+            .set({ status: 'available', bookedByHospitalId: null, bookedAt: null })
             .where(eq(doctorAvailability.id, assignmentData.availabilitySlotId));
         }
       }
-    }
+    });
 
     // Send push notifications for all assignment status changes
     // Accepted/Declined/Completed: Doctor → Hospital
@@ -377,7 +427,7 @@ async function patchHandler(
         const deepLink = 'hospitalapp://view_assignment';
 
         // Get doctor and patient names
-        const [doctorInfo, patientInfo, hospitalInfo] = await Promise.all([
+        const [doctorInfo, patientInfo, hospitalInfo, patientProfileInfo] = await Promise.all([
           db
             .select({
               userId: doctors.userId,
@@ -387,28 +437,43 @@ async function patchHandler(
             .from(doctors)
             .where(eq(doctors.id, assignmentData.doctorId))
             .limit(1),
-          db
-            .select({
-              fullName: patients.fullName,
-            })
-            .from(patients)
-            .where(eq(patients.id, assignmentData.patientId))
-            .limit(1),
-          db
-            .select({
-              userId: hospitals.userId,
-              name: hospitals.name,
-            })
-            .from(hospitals)
-            .where(eq(hospitals.id, assignmentData.hospitalId))
-            .limit(1),
+          assignmentData.patientId
+            ? db
+                .select({
+                  fullName: patients.fullName,
+                })
+                .from(patients)
+                .where(eq(patients.id, assignmentData.patientId))
+                .limit(1)
+            : Promise.resolve([]),
+          assignmentData.hospitalId
+            ? db
+                .select({
+                  userId: hospitals.userId,
+                  name: hospitals.name,
+                })
+                .from(hospitals)
+                .where(eq(hospitals.id, assignmentData.hospitalId))
+                .limit(1)
+            : Promise.resolve([]),
+          assignmentData.patientProfileId
+            ? db
+                .select({
+                  fullName: patientProfiles.fullName,
+                  userId: patientProfiles.userId,
+                })
+                .from(patientProfiles)
+                .where(eq(patientProfiles.id, assignmentData.patientProfileId))
+                .limit(1)
+            : Promise.resolve([]),
         ]);
 
         const doctorName = doctorInfo[0] ? `Dr. ${doctorInfo[0].firstName} ${doctorInfo[0].lastName}` : 'Doctor';
-        const patientName = patientInfo[0]?.fullName || 'Patient';
+        const patientName = patientInfo[0]?.fullName || patientProfileInfo[0]?.fullName || 'Patient';
         const hospitalName = hospitalInfo[0]?.name || 'Hospital';
         const doctorUserId = doctorInfo[0]?.userId;
         const hospitalUserId = hospitalInfo[0]?.userId;
+        const patientUserId = patientProfileInfo[0]?.userId;
 
         // Determine recipient and notification content based on status and who changed it
         let recipientUserId: string | null = null;
@@ -416,34 +481,43 @@ async function patchHandler(
         let notificationMessage = '';
         let notificationType = '';
 
+        const isHomeVisit = assignmentData.source === 'patient' && patientUserId;
+
         if (status === 'accepted') {
-          // Doctor accepted → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Accepted';
-          notificationMessage = `${doctorName} has accepted the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Accepted' : 'Assignment Accepted';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has accepted your home visit request.` 
+            : `${doctorName} has accepted the assignment for ${patientName}`;
           notificationType = 'assignment_accepted';
         } else if (status === 'declined') {
-          // Doctor declined → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Declined';
-          notificationMessage = `${doctorName} has declined the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Declined' : 'Assignment Declined';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has declined your home visit request.` 
+            : `${doctorName} has declined the assignment for ${patientName}`;
           notificationType = 'assignment_declined';
         } else if (status === 'completed') {
-          // Doctor completed → notify hospital
-          recipientUserId = hospitalUserId;
-          notificationTitle = 'Assignment Completed';
-          notificationMessage = `${doctorName} has completed the assignment for ${patientName}`;
+          recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+          notificationTitle = isHomeVisit ? 'Home Visit Completed' : 'Assignment Completed';
+          notificationMessage = isHomeVisit 
+            ? `${doctorName} has completed your home visit.` 
+            : `${doctorName} has completed the assignment for ${patientName}`;
           notificationType = 'assignment_completed';
         } else if (status === 'cancelled') {
-          // Cancelled → notify the other party
           if (user.userRole === 'doctor') {
-            // Doctor cancelled → notify hospital
-            recipientUserId = hospitalUserId;
-            notificationTitle = 'Assignment Cancelled';
-            notificationMessage = `${doctorName} has cancelled the assignment for ${patientName}`;
+            recipientUserId = isHomeVisit ? patientUserId : hospitalUserId;
+            notificationTitle = isHomeVisit ? 'Home Visit Cancelled' : 'Assignment Cancelled';
+            notificationMessage = isHomeVisit 
+              ? `${doctorName} has cancelled the home visit.` 
+              : `${doctorName} has cancelled the assignment for ${patientName}`;
+            notificationType = 'assignment_cancelled';
+          } else if (user.userRole === 'patient') {
+            recipientUserId = doctorUserId;
+            notificationTitle = 'Home Visit Cancelled';
+            notificationMessage = `${patientName} has cancelled their home visit request.`;
             notificationType = 'assignment_cancelled';
           } else if (user.userRole === 'hospital') {
-            // Hospital cancelled → notify doctor
             recipientUserId = doctorUserId;
             notificationTitle = 'Assignment Cancelled';
             notificationMessage = `${hospitalName} has cancelled the assignment for ${patientName}`;
@@ -501,7 +575,7 @@ async function patchHandler(
 
     return NextResponse.json({
       success: true,
-      data: updatedAssignment[0],
+      data: updatedAssignment!,
       message: `Assignment ${status} successfully`,
     });
   } catch (error) {
@@ -517,5 +591,4 @@ async function patchHandler(
   }
 }
 
-export const PATCH = withAuthAndContext(patchHandler, ['doctor', 'hospital', 'admin']);
-
+export const PATCH = withAuthAndContext(patchHandler, ['doctor', 'hospital', 'admin', 'patient']);

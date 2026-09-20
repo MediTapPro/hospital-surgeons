@@ -178,15 +178,16 @@ export class BookingsRepository {
     };
   }
 
-  async getAvailableTimeSlots(doctorId: string, bookingDate: string) {
-    // Get availability slots for the date
+  async getAvailableTimeSlots(doctorId: string, bookingDate: string, type: string = 'hospital') {
+    // Get availability slots for the date with slot_type filter
     const availability = await this.db
       .select()
       .from(doctorAvailability)
       .where(and(
         eq(doctorAvailability.doctorId, doctorId),
         eq(doctorAvailability.slotDate, bookingDate),
-        eq(doctorAvailability.status, 'available')
+        eq(doctorAvailability.status, 'available'),
+        eq(doctorAvailability.slotType, type)
       ));
 
     // Get existing assignments for the date

@@ -8,13 +8,13 @@ import { PatientProfileUpdateDtoSchema } from '@/lib/validations/patient-profile
  * @swagger
  * /api/patients/profile:
  *   get:
- *     summary: Get logged-in patient's profile details
+ *     summary: Get logged-in patient's profile and account contact details
  *     tags: [Patients]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Profile retrieved successfully
+ *         description: Profile retrieved successfully, including read-only email, phone, and profile photo URL
  *       401:
  *         description: Unauthorized
  */

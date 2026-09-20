@@ -333,14 +333,16 @@ export async function GET(
           .where(eq(doctors.id, item.doctorId))
           .limit(1);
 
-        const [patientResult] = await db
-          .select({
-            fullName: patients.fullName,
-            medicalCondition: patients.medicalCondition,
-          })
-          .from(patients)
-          .where(eq(patients.id, item.patientId))
-          .limit(1);
+        const [patientResult] = item.patientId
+          ? await db
+              .select({
+                fullName: patients.fullName,
+                medicalCondition: patients.medicalCondition,
+              })
+              .from(patients)
+              .where(eq(patients.id, item.patientId))
+              .limit(1)
+          : [null];
 
         let slotTime = null;
         if (item.availabilitySlotId) {

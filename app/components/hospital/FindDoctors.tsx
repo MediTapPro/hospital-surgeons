@@ -288,7 +288,7 @@ export function FindDoctors() {
     // Fetch full availability details including booked sub-slots
     try {
       const date = parentSlot.slotDate || searchParams.date || new Date().toISOString().split('T')[0];
-      const availabilityResponse = await apiClient.get(`/api/doctors/${doctor.id}/availability?date=${date}`);
+      const availabilityResponse = await apiClient.get(`/api/doctors/${doctor.id}/availability?date=${date}&type=hospital`);
       
       if (availabilityResponse.data.success && availabilityResponse.data.data) {
         const availability = availabilityResponse.data.data;

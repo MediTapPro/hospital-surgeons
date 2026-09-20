@@ -10,6 +10,7 @@ interface TimeSlot {
   startTime: string;
   endTime: string;
   notes?: string | null;
+  slotType?: 'hospital' | 'home_visit';
 }
 
 interface AddSlotModalProps {
@@ -26,6 +27,7 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
     startTime: '',
     endTime: '',
     notes: '',
+    slotType: 'hospital' as 'hospital' | 'home_visit',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -37,6 +39,7 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
         startTime: editingSlot.startTime,
         endTime: editingSlot.endTime,
         notes: editingSlot.notes || '',
+        slotType: editingSlot.slotType || 'hospital',
       });
     } else {
       // Reset form when not editing
@@ -45,6 +48,7 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
         startTime: '',
         endTime: '',
         notes: '',
+        slotType: 'hospital',
       });
     }
   }, [editingSlot]);
@@ -102,6 +106,7 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
           endTime: formData.endTime,
           notes: formData.notes || null,
           status: 'available',
+          slotType: formData.slotType,
         });
 
         const data = response.data;
@@ -120,6 +125,7 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
           endTime: formData.endTime,
           notes: formData.notes || null,
           status: 'available',
+          slotType: formData.slotType,
           isManual: true,
         });
 
@@ -247,6 +253,38 @@ export function AddSlotModal({ doctorId, onClose, onSuccess, editingSlot }: AddS
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066CC] resize-none"
               />
+            </div>
+
+            {/* Slot Type */}
+            <div>
+              <label className="block text-sm text-gray-700 mb-2 font-medium">Slot type</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, slotType: 'hospital' })}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    formData.slotType === 'hospital'
+                      ? 'bg-[#0066CC] text-white border-[#0066CC]'
+                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Hospital
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, slotType: 'home_visit' })}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    formData.slotType === 'home_visit'
+                      ? 'bg-[#0066CC] text-white border-[#0066CC]'
+                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Home visit
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Hospital = bookable by hospitals. Home visit = bookable by patients for home visits.
+              </p>
             </div>
 
             {/* Error Message */}

@@ -36,6 +36,8 @@ export class RazorpayGateway extends BasePaymentGateway {
         const planId = params.metadata?.planId;
         const userRole = params.metadata?.userRole;
         const email = params.metadata?.email;
+        const assignmentId = params.metadata?.assignmentId;
+        const orderType = params.metadata?.orderType;
         
         // Return checkout data as object (frontend will construct URL from this)
         const checkoutData = {
@@ -43,6 +45,8 @@ export class RazorpayGateway extends BasePaymentGateway {
             planId: planId,
             userRole: userRole,
             email: email,
+            assignmentId: assignmentId,
+            orderType: orderType,
         };
 
         return {

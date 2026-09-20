@@ -3,9 +3,14 @@ import {
   patientProfiles, 
   patientAddresses, 
   patientFamilyMembers,
-  users 
+  users,
+  assignments,
+  homeVisitDetails,
+  doctors,
+  doctorAvailability,
+  files,
 } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 
 export interface CreatePatientProfileData {
   fullName: string;
@@ -42,8 +47,20 @@ export class PatientProfilesRepository {
 
   async findProfileByUserId(userId: string) {
     const result = await this.db
-      .select()
+      .select({
+        id: patientProfiles.id,
+        userId: patientProfiles.userId,
+        fullName: patientProfiles.fullName,
+        profilePhotoId: patientProfiles.profilePhotoId,
+        profilePhotoUrl: files.url,
+        email: users.email,
+        phone: users.phone,
+        createdAt: patientProfiles.createdAt,
+        updatedAt: patientProfiles.updatedAt,
+      })
       .from(patientProfiles)
+      .innerJoin(users, eq(patientProfiles.userId, users.id))
+      .leftJoin(files, eq(patientProfiles.profilePhotoId, files.id))
       .where(eq(patientProfiles.userId, userId))
       .limit(1);
     return result[0] || null;
@@ -67,6 +84,18 @@ export class PatientProfilesRepository {
       .update(patientProfiles)
       .set({
         fullName,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(patientProfiles.id, id))
+      .returning();
+  }
+
+  async updateProfilePhoto(id: string, profilePhotoId: string, tx?: any) {
+    const client = tx || this.db;
+    return await client
+      .update(patientProfiles)
+      .set({
+        profilePhotoId,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(patientProfiles.id, id))
@@ -203,5 +232,64 @@ export class PatientProfilesRepository {
       .delete(patientFamilyMembers)
       .where(eq(patientFamilyMembers.id, id))
       .returning();
+  }
+
+  // --- Home Visit Bookings (Patient-Facing) ---
+  async getPatientHomeVisitBookings(patientProfileId: string) {
+    return await this.db
+      .select({
+        id: assignments.id,
+        status: assignments.status,
+        priority: assignments.priority,
+        source: assignments.source,
+        requestedAt: assignments.requestedAt,
+        expiresAt: assignments.expiresAt,
+        actualStartTime: assignments.actualStartTime,
+        actualEndTime: assignments.actualEndTime,
+        treatmentNotes: assignments.treatmentNotes,
+        consultationFee: assignments.consultationFee,
+        cancellationReason: assignments.cancellationReason,
+        cancelledAt: assignments.cancelledAt,
+        completedAt: assignments.completedAt,
+        paidAt: assignments.paidAt,
+        specialtyId: assignments.specialtyId,
+        // Doctor info
+        doctorId: doctors.id,
+        doctorFirstName: doctors.firstName,
+        doctorLastName: doctors.lastName,
+        doctorPrimaryLocation: doctors.primaryLocation,
+        doctorLatitude: doctors.latitude,
+        doctorLongitude: doctors.longitude,
+        // Visit metadata
+        symptoms: homeVisitDetails.symptoms,
+        clinicalNotes: homeVisitDetails.clinicalNotes,
+        prescription: homeVisitDetails.prescription,
+        paymentMode: homeVisitDetails.paymentMode,
+        isFreeTrial: homeVisitDetails.isFreeTrial,
+        // Address info (snapshot taken at booking time)
+        addressLabel: homeVisitDetails.addressLabel,
+        addressText: homeVisitDetails.addressText,
+        addressLatitude: homeVisitDetails.addressLatitude,
+        addressLongitude: homeVisitDetails.addressLongitude,
+        // Family member (recipient) info (snapshot taken at booking time)
+        familyMemberId: homeVisitDetails.patientFamilyMemberId,
+        familyMemberFullName: homeVisitDetails.recipientName,
+        familyMemberRelationship: homeVisitDetails.recipientRelationship,
+        // Availability slot info
+        slotDate: doctorAvailability.slotDate,
+        slotStartTime: doctorAvailability.startTime,
+        slotEndTime: doctorAvailability.endTime,
+      })
+      .from(assignments)
+      .innerJoin(homeVisitDetails, eq(homeVisitDetails.assignmentId, assignments.id))
+      .innerJoin(doctors, eq(doctors.id, assignments.doctorId))
+      .leftJoin(doctorAvailability, eq(doctorAvailability.id, assignments.availabilitySlotId))
+      .where(
+        and(
+          eq(assignments.patientProfileId, patientProfileId),
+          eq(assignments.source, 'patient')
+        )
+      )
+      .orderBy(desc(assignments.requestedAt));
   }
 }

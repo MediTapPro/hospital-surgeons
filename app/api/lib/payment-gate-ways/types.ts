@@ -5,7 +5,7 @@ export interface PaymentGatewayConfig {
     webhookSecret?: string;
     apiSecret?: string;
   }
-  
+
   export interface CreateCheckoutParams {
     amount: number;
     currency: string;
@@ -15,7 +15,7 @@ export interface PaymentGatewayConfig {
     cancelUrl: string;
     planId?: string;
   }
-  
+
   export interface CheckoutSession {
     id: string;
     gateway: string;
@@ -24,6 +24,8 @@ export interface PaymentGatewayConfig {
       planId?: string;
       userRole?: string;
       email?: string;
+      assignmentId?: string;
+      orderType?: string;
     };
   }
   
@@ -32,5 +34,3 @@ export interface PaymentGatewayConfig {
     data: any;
     gateway: string;
   }
-  
-  

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { paymentManager } from '@/app/api/lib/payment-gate-ways/payment-gateway-manager';
 import { RazorpayGateway } from '@/app/api/lib/payment-gate-ways/gatways/razorpay';
 import { getDb } from '@/lib/db';
-import { orders, paymentTransactions, webhookEvents, subscriptions, planPricing, subscriptionPlans } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { assignmentPayments, assignments, homeVisitDetails, orders, paymentTransactions, webhookEvents, subscriptions, planPricing, subscriptionPlans } from '@/src/db/drizzle/migrations/schema';
+import { eq, and, asc, isNull, sql } from 'drizzle-orm';
 import crypto from 'crypto';
 import { SubscriptionsService } from '@/lib/services/subscriptions.service';
 
@@ -12,7 +12,7 @@ import { SubscriptionsService } from '@/lib/services/subscriptions.service';
  * /api/payments/verify:
  *   post:
  *     summary: Verify payment after successful transaction
- *     description: Verifies Razorpay payment signature, updates order status, creates payment transaction record, and creates subscription if payment is successful. Also handles upgrades and billing cycle changes automatically.
+ *     description: Verifies a Razorpay payment. For a completed paid home visit, it atomically records the patient payment and makes the doctor settlement pending. Subscription flows keep their existing lifecycle.
  *     tags: [Payments]
  *     requestBody:
  *       required: true
@@ -158,6 +158,13 @@ export async function POST(req: NextRequest) {
     // STEP 2: Fetch payment details from Razorpay
     // ============================================
     const payment = await gateway.fetchPayment(razorpay_payment_id);
+
+    if (payment.order_id !== razorpay_order_id) {
+      return NextResponse.json(
+        { success: false, error: 'Payment does not belong to this order' },
+        { status: 400 }
+      );
+    }
     
     console.log('Payment verified:', {
       payment_id: razorpay_payment_id,
@@ -195,78 +202,168 @@ export async function POST(req: NextRequest) {
 
     const dbOrder = dbOrderResult[0];
 
-    // ============================================
-    // STEP 5: Update order status
-    // ============================================
-    if (internalStatus === 'success') {
-      // ✅ Payment successful
-      await getDb()
-        .update(orders)
-        .set({
-          status: 'paid',
-          paidAt: new Date().toISOString(),
-        })
-        .where(eq(orders.id, dbOrder.id));
-    } else if (internalStatus === 'failed') {
-      // ❌ Payment failed
-      await getDb()
-        .update(orders)
-        .set({
-          status: 'failed',
-          failureReason: `Payment status: ${payment.status}`,
-        })
-        .where(eq(orders.id, dbOrder.id));
-    }
-    // If pending, don't update order status (wait for webhook)
+    const paymentTransaction = await getDb().transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM orders WHERE id = ${dbOrder.id} FOR UPDATE`);
+      let homeVisitAssignmentId: string | null = null;
 
-    // ============================================
-    // STEP 6: Check if payment transaction already exists (idempotency)
-    // ============================================
-    const existingTransaction = await getDb()
-      .select()
-      .from(paymentTransactions)
-      .where(
-        and(
-          eq(paymentTransactions.gatewayName, 'razorpay'),
-          eq(paymentTransactions.gatewayPaymentId, razorpay_payment_id)
+      const [lockedOrder] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.id, dbOrder.id))
+        .limit(1);
+
+      if (!lockedOrder) {
+        throw new Error('Order not found while recording payment');
+      }
+
+      if (
+        lockedOrder.gatewayOrderId !== razorpay_order_id
+        || Math.round(payment.amount / 100) !== Number(lockedOrder.amount)
+        || payment.currency !== lockedOrder.currency
+      ) {
+        throw new Error('Payment details do not match the order');
+      }
+
+      if (internalStatus === 'success') {
+        if (lockedOrder.orderType === 'consultation') {
+          if (!lockedOrder.assignmentId) {
+            throw new Error('Consultation order has no assignment');
+          }
+
+          const [homeVisit] = await tx
+            .select({
+              assignmentId: assignments.id,
+              status: assignments.status,
+              paymentMode: homeVisitDetails.paymentMode,
+              isFreeTrial: homeVisitDetails.isFreeTrial,
+            })
+            .from(assignments)
+            .innerJoin(homeVisitDetails, eq(homeVisitDetails.assignmentId, assignments.id))
+            .where(eq(assignments.id, lockedOrder.assignmentId))
+            .limit(1);
+
+          if (
+            !homeVisit
+            || homeVisit.status !== 'completed'
+            || homeVisit.isFreeTrial
+            || homeVisit.paymentMode !== 'pay_after_completion'
+          ) {
+            throw new Error('Consultation payment is not eligible for completion');
+          }
+
+          homeVisitAssignmentId = lockedOrder.assignmentId;
+
+          await tx
+            .update(assignments)
+            .set({ paidAt: new Date().toISOString() })
+            .where(and(eq(assignments.id, lockedOrder.assignmentId), isNull(assignments.paidAt)));
+        }
+
+        await tx
+          .update(orders)
+          .set({
+            status: 'paid',
+            paidAt: lockedOrder.paidAt ?? new Date().toISOString(),
+          })
+          .where(eq(orders.id, lockedOrder.id));
+      } else if (internalStatus === 'failed') {
+        await tx
+          .update(orders)
+          .set({
+            status: 'failed',
+            failureReason: `Payment status: ${payment.status}`,
+          })
+          .where(eq(orders.id, lockedOrder.id));
+      }
+
+      const [existingTransaction] = await tx
+        .select()
+        .from(paymentTransactions)
+        .where(
+          and(
+            eq(paymentTransactions.gatewayName, 'razorpay'),
+            eq(paymentTransactions.gatewayPaymentId, razorpay_payment_id)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    let paymentTransaction = existingTransaction.length > 0 ? existingTransaction[0] : null;
+      if (existingTransaction) {
+        if (homeVisitAssignmentId) {
+          const updatedPayment = await tx
+            .update(assignmentPayments)
+            .set({
+              patientPaymentStatus: 'paid',
+              patientPaidAt: new Date().toISOString(),
+              paymentTransactionId: existingTransaction.id,
+              paymentOrderId: lockedOrder.id,
+              paymentStatus: 'pending',
+            })
+            .where(
+              and(
+                eq(assignmentPayments.assignmentId, homeVisitAssignmentId),
+                eq(assignmentPayments.paymentSource, 'home_visit')
+              )
+            )
+            .returning({ id: assignmentPayments.id });
+          if (updatedPayment.length === 0) {
+            throw new Error('HOME_VISIT_SETTLEMENT_NOT_FOUND');
+          }
+        }
+        return existingTransaction;
+      }
 
-    // ============================================
-    // STEP 7: Create payment transaction if not exists
-    // ============================================
-    if (!paymentTransaction) {
-      const transactionResult = await getDb()
+      const transactionResult = await tx
         .insert(paymentTransactions)
         .values({
-          orderId: dbOrder.id,
+          orderId: lockedOrder.id,
           paymentGateway: 'razorpay',
           paymentId: razorpay_payment_id,
           gatewayName: 'razorpay',
           gatewayPaymentId: razorpay_payment_id,
           gatewayOrderId: razorpay_order_id,
           paymentMethod: payment.method || 'card',
-          amount: Math.round(payment.amount / 100), // Convert paise to rupees for storage
+          amount: Math.round(payment.amount / 100),
           currency: payment.currency,
-          status: internalStatus, // 'success' | 'pending' | 'failed' | 'refunded'
-          gatewayResponse: payment, // Full Razorpay payment object
+          status: internalStatus,
+          gatewayResponse: payment,
           verifiedAt: new Date().toISOString(),
-          verifiedVia: 'manual', // Not from webhook
-          userId: dbOrder.userId,
-          planId: dbOrder.planId,
-          pricingId: dbOrder.pricingId,
+          verifiedVia: 'manual',
+          userId: lockedOrder.userId,
+          planId: lockedOrder.planId,
+          pricingId: lockedOrder.pricingId,
         })
         .returning();
 
-      paymentTransaction = Array.isArray(transactionResult) ? transactionResult[0] : transactionResult;
-    }
+      const createdTransaction = Array.isArray(transactionResult) ? transactionResult[0] : null;
 
-    if (!paymentTransaction) {
-      throw new Error('Failed to create payment transaction');
-    }
+      if (!createdTransaction) {
+        throw new Error('Failed to create payment transaction');
+      }
+
+      if (homeVisitAssignmentId) {
+        const updatedPayment = await tx
+          .update(assignmentPayments)
+          .set({
+            patientPaymentStatus: 'paid',
+            patientPaidAt: new Date().toISOString(),
+            paymentTransactionId: createdTransaction.id,
+            paymentOrderId: lockedOrder.id,
+            paymentStatus: 'pending',
+          })
+          .where(
+            and(
+              eq(assignmentPayments.assignmentId, homeVisitAssignmentId),
+              eq(assignmentPayments.paymentSource, 'home_visit')
+            )
+          )
+          .returning({ id: assignmentPayments.id });
+        if (updatedPayment.length === 0) {
+          throw new Error('HOME_VISIT_SETTLEMENT_NOT_FOUND');
+        }
+      }
+
+      return createdTransaction;
+    });
 
     // ============================================
     // STEP 8: Create webhook event record
@@ -482,6 +579,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let homeVisitAssignmentId: string | null = null;
+    if (internalStatus === 'success' && dbOrder.orderType === 'consultation' && dbOrder.assignmentId) {
+      homeVisitAssignmentId = dbOrder.assignmentId;
+    }
+
     // ============================================
     // STEP 10: Return success response
     // ============================================
@@ -505,6 +607,7 @@ export async function POST(req: NextRequest) {
         status: internalStatus,
       },
       subscription: subscriptionId ? { id: subscriptionId } : null,
+      homeVisit: homeVisitAssignmentId ? { assignmentId: homeVisitAssignmentId } : null,
     });
   } catch (error: any) {
     console.error('Payment verification error:', error);
@@ -514,5 +617,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
-

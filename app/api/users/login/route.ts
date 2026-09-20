@@ -29,12 +29,12 @@ import { validateRequest } from '@/lib/utils/validate-request';
  *                 example: "SecurePassword123!"
  *               accountType:
  *                 type: string
- *                 enum: [doctor, hospital, admin]
+ *                 enum: [doctor, hospital, admin, patient]
  *                 description: Optional. Expected account type for validation. If provided, must match user's actual role.
  *                 example: doctor
  *     responses:
  *       200:
- *         description: Login successful
+ *         description: Login successful. The user's last_login_at timestamp is updated after credentials and account type are validated.
  *         content:
  *           application/json:
  *             schema:

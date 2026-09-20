@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { specialties, doctorSpecialties, hospitalDepartments } from '@/src/db/drizzle/migrations/schema';
-import { eq, sql, count } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
 import { validateRequest } from '@/lib/utils/validate-request';
 import { UpdateSpecialtyDtoSchema } from '@/lib/validations/specialty.dto';
-import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/utils/audit-logger';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { SpecialtiesService } from '@/lib/services/specialties.service';
+import { SPECIALTY_ERROR_CODES } from '@/lib/enums/specialties.enums';
 /**
  * @swagger
  * /api/admin/specialties/{id}:
@@ -24,6 +24,10 @@ import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/ut
  *     responses:
  *       200:
  *         description: Specialty details retrieved successfully
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
  *       404:
  *         description: Specialty not found
  *       500:
@@ -54,16 +58,25 @@ import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/ut
  *     responses:
  *       200:
  *         description: Specialty updated successfully
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
  *       404:
  *         description: Specialty not found
  *       409:
- *         description: Specialty name already in use
+ *         description: A specialty with this name already exists (case-insensitive)
  *       500:
  *         description: Internal server error
  *
  *   delete:
  *     summary: Delete specialty (Admin)
- *     description: Remove a specialty if it is not currently associated with any doctors or hospitals.
+ *     description: >
+ *       Remove a specialty. Deletion is rejected while the specialty is referenced by any
+ *       doctor specialty, hospital department, procedure category, procedure, assignment,
+ *       doctor procedure fee, or platform home-visit fee configuration. Six of those
+ *       relationships cascade on delete, so this check prevents silently destroying
+ *       referencing rows.
  *     tags: [Admin, Specialties]
  *     security:
  *       - bearerAuth: []
@@ -77,296 +90,123 @@ import { createAuditLog, getRequestMetadata, buildChangesObject } from '@/lib/ut
  *     responses:
  *       200:
  *         description: Specialty deleted successfully
+ *       401:
+ *         description: Authorization header missing or invalid token
+ *       403:
+ *         description: Insufficient permissions
  *       404:
  *         description: Specialty not found
  *       409:
- *         description: Cannot delete specialty as it is currently in use
+ *         description: Cannot delete specialty as it is currently referenced by dependent records
  *       500:
  *         description: Internal server error
  */
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function getHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
-    const { id } = await params;
-    const specialtyId = id;
+    const { id } = await context.params;
+    const result = await new SpecialtiesService().getSpecialtyForAdmin(id);
 
-    // Get specialty
-    const specialtyResult = await db
-      .select({
-        id: specialties.id,
-        name: specialties.name,
-        description: specialties.description,
-      })
-      .from(specialties)
-      .where(eq(specialties.id, specialtyId))
-      .limit(1);
-
-    if (specialtyResult.length === 0) {
+    if (!result.success) {
       return NextResponse.json(
-        { success: false, message: 'Specialty not found' },
+        { success: false, message: result.message },
         { status: 404 }
       );
     }
 
-    const specialty = specialtyResult[0];
-
-    // Get usage counts separately
-    const doctorCountResult = await db
-      .select({ count: count() })
-      .from(doctorSpecialties)
-      .where(eq(doctorSpecialties.specialtyId, specialtyId));
-
-    const hospitalCountResult = await db
-      .select({ count: count() })
-      .from(hospitalDepartments)
-      .where(eq(hospitalDepartments.specialtyId, specialtyId));
-
-    const doctorCount = Number(doctorCountResult[0]?.count || 0);
-    const hospitalCount = Number(hospitalCountResult[0]?.count || 0);
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: specialty.id,
-        name: specialty.name,
-        description: specialty.description,
-        activeDoctors: doctorCount,
-        activeHospitals: hospitalCount,
-        status: 'Active',
-      },
-    });
+    return NextResponse.json({ success: true, data: result.data });
   } catch (error) {
     console.error('Error fetching specialty:', error);
     return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to fetch specialty',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { success: false, message: 'Failed to fetch specialty' },
       { status: 500 }
     );
   }
 }
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function putHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
-    const { id } = await params;
-    const specialtyId = id;
-    
-    // Validate request body with Zod schema
     const validation = await validateRequest(req, UpdateSpecialtyDtoSchema);
     if (!validation.success) {
       return validation.response;
     }
 
-    const { name, description } = validation.data;
-
-    // Check if specialty exists
-    const existing = await db
-      .select()
-      .from(specialties)
-      .where(eq(specialties.id, specialtyId))
-      .limit(1);
-
-    if (existing.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'Specialty not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if another specialty with same name exists (duplicate check)
-    if (name && name.trim() !== existing[0].name) {
-      const duplicate = await db
-        .select()
-        .from(specialties)
-        .where(eq(specialties.name, name.trim()))
-        .limit(1);
-
-      if (duplicate.length > 0 && duplicate[0].id !== specialtyId) {
-        return NextResponse.json(
-          { success: false, message: 'Specialty with this name already exists' },
-          { status: 409 }
-        );
-      }
-    }
-
-    // Update specialty
-    const updateData: any = {};
-    if (name !== undefined) updateData.name = name.trim();
-    if (description !== undefined) updateData.description = description?.trim() || null;
-
-    const [updatedSpecialty] = await db
-      .update(specialties)
-      .set(updateData)
-      .where(eq(specialties.id, specialtyId))
-      .returning();
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Build changes object
-    const oldData: any = {
-      name: existing[0].name,
-      description: existing[0].description,
-    };
-    const newData: any = {
-      name: updatedSpecialty.name,
-      description: updatedSpecialty.description,
-    };
-    const changes = buildChangesObject(oldData, newData, ['name', 'description']);
-
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'update',
-      entityType: 'specialty',
-      entityId: specialtyId,
-      entityName: updatedSpecialty.name,
-      httpMethod: 'PUT',
-      endpoint: `/api/admin/specialties/${specialtyId}`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      changes: changes,
-      details: {
-        updatedAt: new Date().toISOString(),
-      },
+    const { id } = await context.params;
+    const result = await new SpecialtiesService().updateSpecialtyForAdmin(id, validation.data, {
+      adminUserId: req.user!.userId,
+      requestMetadata: getRequestMetadata(req),
     });
+
+    if (!result.success) {
+      const status =
+        result.code === SPECIALTY_ERROR_CODES.NOT_FOUND
+          ? 404
+          : result.code === SPECIALTY_ERROR_CODES.DUPLICATE_NAME
+            ? 409
+            : 500;
+
+      return NextResponse.json({ success: false, message: result.message }, { status });
+    }
 
     return NextResponse.json({
       success: true,
-      message: 'Specialty updated successfully',
-      data: {
-        id: updatedSpecialty.id,
-        name: updatedSpecialty.name,
-        description: updatedSpecialty.description,
-      },
+      message: result.message,
+      data: result.data,
     });
   } catch (error) {
     console.error('Error updating specialty:', error);
     return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to update specialty',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { success: false, message: 'Failed to update specialty' },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+async function deleteHandler(
+  req: AuthenticatedRequest,
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const db = getDb();
-    const { id } = await params;
-    const specialtyId = id;
+    const { id } = await context.params;
+    const result = await new SpecialtiesService().deleteSpecialtyForAdmin(id, {
+      adminUserId: req.user!.userId,
+      requestMetadata: getRequestMetadata(req),
+    });
 
-    // Check if specialty exists
-    const existing = await db
-      .select()
-      .from(specialties)
-      .where(eq(specialties.id, specialtyId))
-      .limit(1);
+    if (!result.success) {
+      const status =
+        result.code === SPECIALTY_ERROR_CODES.NOT_FOUND
+          ? 404
+          : result.code === SPECIALTY_ERROR_CODES.SPECIALTY_IN_USE
+            ? 409
+            : 500;
 
-    if (existing.length === 0) {
-      return NextResponse.json(
-        { success: false, message: 'Specialty not found' },
-        { status: 404 }
-      );
-    }
-
-    // Step 1: Check if specialty is being used by doctors before deletion
-    const doctorUsage = await db
-      .select({ count: count() })
-      .from(doctorSpecialties)
-      .where(eq(doctorSpecialties.specialtyId, specialtyId));
-
-    const doctorCount = Number(doctorUsage[0]?.count || 0);
-
-    // Step 2: Check if specialty is being used by hospitals before deletion
-    const hospitalUsage = await db
-      .select({ count: count() })
-      .from(hospitalDepartments)
-      .where(eq(hospitalDepartments.specialtyId, specialtyId));
-
-    const hospitalCount = Number(hospitalUsage[0]?.count || 0);
-
-    // Step 3: Prevent deletion if specialty is being used
-    if (doctorCount > 0 || hospitalCount > 0) {
-      const parts = [];
-      if (doctorCount > 0) parts.push(`${doctorCount} doctor(s)`);
-      if (hospitalCount > 0) parts.push(`${hospitalCount} hospital(s)`);
-      
       return NextResponse.json(
         {
           success: false,
-          message: `Cannot delete specialty. It is being used by ${parts.join(' and ')}.`,
-          data: {
-            doctorCount,
-            hospitalCount,
-          },
+          message: result.message,
+          data: 'data' in result ? result.data : undefined,
         },
-        { status: 409 }
+        { status }
       );
     }
 
-    // Delete specialty
-    await db
-      .delete(specialties)
-      .where(eq(specialties.id, specialtyId));
-
-    // Get request metadata
-    const metadata = getRequestMetadata(req);
-    const adminUserId = req.headers.get('x-user-id') || null;
-
-    // Create comprehensive audit log
-    await createAuditLog({
-      userId: adminUserId,
-      actorType: 'admin',
-      action: 'delete',
-      entityType: 'specialty',
-      entityId: specialtyId,
-      entityName: existing[0].name,
-      httpMethod: 'DELETE',
-      endpoint: `/api/admin/specialties/${specialtyId}`,
-      ipAddress: metadata.ipAddress,
-      userAgent: metadata.userAgent,
-      details: {
-        description: existing[0].description,
-        doctorCountAtDeletion: doctorCount,
-        hospitalCountAtDeletion: hospitalCount,
-        deletedAt: new Date().toISOString(),
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: 'Specialty deleted successfully',
-    });
+    return NextResponse.json({ success: true, message: result.message });
   } catch (error) {
     console.error('Error deleting specialty:', error);
     return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to delete specialty',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { success: false, message: 'Failed to delete specialty' },
       { status: 500 }
     );
   }
 }
 
-
+export const GET = withAuthAndContext(getHandler, ['admin']);
+export const PUT = withAuthAndContext(putHandler, ['admin']);
+export const DELETE = withAuthAndContext(deleteHandler, ['admin']);

@@ -1,11 +1,13 @@
 import { getDb } from '@/lib/db';
 import { users, userDevices } from '@/src/db/drizzle/migrations/schema';
 import { eq, and } from 'drizzle-orm';
+import type { UserAccountStatus, UserRole } from '@/lib/enums/users.enums';
 
 export interface CreateUserData {
   email: string;
   password_hash: string;
   phone?: string;
+  status?: UserAccountStatus;
 }
 
 export interface CreateDeviceData {
@@ -25,7 +27,7 @@ export interface UpdateUserData {
 export class UsersRepository {
   constructor(private db: any = getDb()) {}
 
-  async createUser(data: CreateUserData, role: 'doctor' | 'hospital' | 'admin' | 'patient' = 'doctor') {
+  async createUser(data: CreateUserData, role: UserRole = 'doctor') {
     return await this.db
       .insert(users)
       .values({
@@ -33,6 +35,7 @@ export class UsersRepository {
         passwordHash: data.password_hash,
         phone: data.phone,
         role: role,
+        ...(data.status !== undefined && { status: data.status }),
       })
       .returning();
   }
@@ -146,6 +149,19 @@ export class UsersRepository {
       .returning();
   }
 
+  async recordSuccessfulLogin(id: string) {
+    const [user] = await this.db
+      .update(users)
+      .set({
+        lastLoginAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(users.id, id))
+      .returning({ id: users.id, lastLoginAt: users.lastLoginAt });
+
+    return user ?? null;
+  }
+
   async getUserById(id: string) {
     const user = await this.db
       .select()
@@ -167,5 +183,3 @@ export class UsersRepository {
     return await this.db.select().from(users);
   }
 }
-
-
