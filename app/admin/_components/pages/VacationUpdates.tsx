@@ -5,8 +5,10 @@ import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Loader2, Filter, Calendar } from 'lucide-react';
+import { Loader2, Filter } from 'lucide-react';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface VacationUpdate {
   id: string;
@@ -29,7 +31,8 @@ export function VacationUpdates() {
   const [updates, setUpdates] = useState<VacationUpdate[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Filters
   const [doctorId, setDoctorId] = useState<string>('all');
@@ -54,13 +57,12 @@ export function VacationUpdates() {
 
   useEffect(() => {
     fetchUpdates();
-  }, [page, appliedFilters]);
+  }, [page, pageSize, appliedFilters]);
 
   const fetchDoctors = async () => {
     try {
       setLoadingDoctors(true);
-      const res = await fetch('/api/admin/doctors/list');
-      const data = await res.json();
+      const { data } = await apiClient.get('/api/admin/doctors/list');
       if (data.success) {
         setDoctors(data.data || []);
       }
@@ -76,7 +78,7 @@ export function VacationUpdates() {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '20',
+        limit: pageSize.toString(),
       });
 
       if (appliedFilters.doctorId !== 'all') {
@@ -92,12 +94,11 @@ export function VacationUpdates() {
         params.append('endDate', appliedFilters.endDate);
       }
 
-      const res = await fetch(`/api/admin/vacation-updates?${params.toString()}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/vacation-updates?${params.toString()}`);
 
       if (data.success) {
         setUpdates(data.data || []);
-        setTotalPages(data.pagination?.totalPages || 1);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error(data.message || 'Failed to fetch vacation updates');
       }
@@ -161,6 +162,16 @@ export function VacationUpdates() {
     };
     return colors[type] || colors.other;
   };
+
+  const columns: AdminDataTableColumn<VacationUpdate>[] = [
+    { id: 'createdAt', label: 'Created', widthClassName: 'w-[190px]', cell: (update) => <span className="text-sm text-slate-600">{formatDateTime(update.createdAt)}</span> },
+    { id: 'doctor', label: 'Doctor', widthClassName: 'w-[220px]', cell: (update) => <span className="font-medium text-slate-900">{update.doctorName}</span> },
+    { id: 'leaveType', label: 'Leave type', widthClassName: 'w-[150px]', cell: (update) => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${getLeaveTypeColor(update.leaveType)}`}>{update.leaveType}</span> },
+    { id: 'startDate', label: 'Start date', widthClassName: 'w-[140px]', cell: (update) => <span className="text-slate-600">{formatDate(update.startDate)}</span> },
+    { id: 'endDate', label: 'End date', widthClassName: 'w-[140px]', cell: (update) => <span className="text-slate-600">{formatDate(update.endDate)}</span> },
+    { id: 'duration', label: 'Duration', widthClassName: 'w-[120px]', cell: (update) => <span className="text-slate-600">{update.durationDays} day{update.durationDays !== 1 ? 's' : ''}</span> },
+    { id: 'reason', label: 'Reason', widthClassName: 'w-[260px]', cell: (update) => <span className="block max-w-[240px] truncate text-sm text-slate-600" title={update.reason || undefined}>{update.reason || '—'}</span> },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -251,90 +262,10 @@ export function VacationUpdates() {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-lg shadow">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-slate-600">Created At</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Doctor</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Leave Type</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Start Date</th>
-                    <th className="px-6 py-3 text-left text-slate-600">End Date</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Duration</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {updates.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                        No vacation updates found
-                      </td>
-                    </tr>
-                  ) : (
-                    updates.map((update) => (
-                      <tr key={update.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4 text-slate-600 text-sm">
-                          {formatDateTime(update.createdAt)}
-                        </td>
-                        <td className="px-6 py-4 text-slate-900">{update.doctorName}</td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${getLeaveTypeColor(update.leaveType)}`}>
-                            {update.leaveType}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-600">{formatDate(update.startDate)}</td>
-                        <td className="px-6 py-4 text-slate-600">{formatDate(update.endDate)}</td>
-                        <td className="px-6 py-4 text-slate-600">
-                          {update.durationDays} day{update.durationDays !== 1 ? 's' : ''}
-                        </td>
-                        <td className="px-6 py-4 text-slate-600 text-sm max-w-xs truncate">
-                          {update.reason || '-'}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-              <div className="text-sm text-slate-600">
-                Page {page} of {totalPages}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {loading ? <div className="flex items-center justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-teal-600" /></div> : <AdminDataTable columns={columns} data={updates} emptyMessage="No vacation updates found" getRowKey={(update) => update.id} minWidthClassName="min-w-[1200px]" pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }} />}
         </div>
       </div>
     </div>
   );
 }
-

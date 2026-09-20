@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
 import { PlatformFeesService } from '@/lib/services/platform-fees.service';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
 const feesService = new PlatformFeesService();
 
@@ -28,7 +29,7 @@ async function deleteHandler(
   const params = await context.params;
   const id = params.id;
 
-  const result = await feesService.deletePlatformFee(id);
+  const result = await feesService.deletePlatformFee(id, { userId: req.user!.userId, requestMetadata: getRequestMetadata(req) });
   if (!result.success) {
     return NextResponse.json(result, { status: 400 });
   }

@@ -1,27 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { doctors } from '@/src/db/drizzle/migrations/schema';
-import { sql } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
+import { withAuth, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { AdminDoctorsService } from '@/lib/services/admin-doctors.service';
 
-export async function GET(req: NextRequest) {
+/** @swagger
+ * /api/admin/doctors/list:
+ *   get:
+ *     summary: List doctors for admin filters
+ *     tags: [Admin Doctors]
+ *     security: [{ bearerAuth: [] }]
+ *     responses: { 200: { description: Doctors retrieved }, 403: { description: Admin access required } }
+ */
+async function getHandler(_req: AuthenticatedRequest) {
   try {
-    const db = getDb();
-
-    // Get all doctors with their names
-    const doctorsList = await db
-      .select({
-        id: doctors.id,
-        firstName: doctors.firstName,
-        lastName: doctors.lastName,
-      })
-      .from(doctors)
-      .orderBy(sql`${doctors.firstName} ASC, ${doctors.lastName} ASC`);
-
-    // Format response
-    const formattedDoctors = doctorsList.map((doctor) => ({
-      id: doctor.id,
-      name: `Dr. ${doctor.firstName || ''} ${doctor.lastName || ''}`.trim() || 'Unknown',
-    }));
+    const formattedDoctors = await new AdminDoctorsService().list();
 
     return NextResponse.json({
       success: true,
@@ -40,3 +31,4 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export const GET = withAuth(getHandler, ['admin']);

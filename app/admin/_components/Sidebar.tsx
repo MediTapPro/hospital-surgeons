@@ -11,7 +11,6 @@ import {
   ClipboardList,
   Building2,
   Wallet,
-  BarChart3,
   FileText,
   Settings,
   ChevronLeft,
@@ -91,7 +90,6 @@ export function Sidebar() {
     { id: "payments", label: "Payments", icon: CreditCard, href: "/admin/payments" },
     { id: "home-visit-fees", label: "Home Visit Fees", icon: Coins, href: "/admin/home-visit-fees" },
     { id: "home-visit-settings", label: "Home Visit Settings", icon: SlidersHorizontal, href: "/admin/home-visit-settings" },
-    { id: "analytics", label: "Analytics", icon: BarChart3, href: "/admin/analytics" },
     { id: "schedule-updates", label: "Schedule Updates", icon: Calendar, href: "/admin/schedule-updates" },
     { id: "vacation-updates", label: "Vacation Updates", icon: CalendarX, href: "/admin/vacation-updates" },
     { id: "audit-logs", label: "Audit Logs", icon: FileText, href: "/admin/audit-logs" },
@@ -196,4 +194,3 @@ export function Sidebar() {
     </aside>
   );
 }
-

@@ -3,8 +3,12 @@
 import { useState, useEffect } from 'react';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
-import { Download, Calendar, Loader2 } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import apiClient from '@/lib/api/httpClient';
+import { formatPlatformCurrency } from '@/lib/utils/constants';
+import { toast } from 'sonner';
 
 export function Analytics() {
   const [overview, setOverview] = useState<any>(null);
@@ -13,48 +17,32 @@ export function Analytics() {
   const [revenueAnalytics, setRevenueAnalytics] = useState<any>(null);
   const [trends, setTrends] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [months, setMonths] = useState('12');
 
   useEffect(() => {
     fetchAllAnalytics();
-  }, []);
+  }, [months]);
 
   const fetchAllAnalytics = async () => {
     try {
       setLoading(true);
+      const query = { params: { months } };
       const [overviewRes, usersRes, assignmentsRes, revenueRes, trendsRes] = await Promise.all([
-        fetch('/api/admin/analytics/overview?months=12'),
-        fetch('/api/admin/analytics/users?months=12'),
-        fetch('/api/admin/analytics/assignments?months=12'),
-        fetch('/api/admin/analytics/revenue?months=12'),
-        fetch('/api/admin/analytics/trends?months=12'),
+        apiClient.get('/api/admin/analytics/overview', query),
+        apiClient.get('/api/admin/analytics/users', query),
+        apiClient.get('/api/admin/analytics/assignments', query),
+        apiClient.get('/api/admin/analytics/revenue', query),
+        apiClient.get('/api/admin/analytics/trends', query),
       ]);
 
-      if (overviewRes.ok) {
-        const data = await overviewRes.json();
-        if (data.success) setOverview(data.data);
-      }
-
-      if (usersRes.ok) {
-        const data = await usersRes.json();
-        if (data.success) setUserAnalytics(data.data);
-      }
-
-      if (assignmentsRes.ok) {
-        const data = await assignmentsRes.json();
-        if (data.success) setAssignmentAnalytics(data.data);
-      }
-
-      if (revenueRes.ok) {
-        const data = await revenueRes.json();
-        if (data.success) setRevenueAnalytics(data.data);
-      }
-
-      if (trendsRes.ok) {
-        const data = await trendsRes.json();
-        if (data.success) setTrends(data.data || []);
-      }
+      if (overviewRes.data.success) setOverview(overviewRes.data.data);
+      if (usersRes.data.success) setUserAnalytics(usersRes.data.data);
+      if (assignmentsRes.data.success) setAssignmentAnalytics(assignmentsRes.data.data);
+      if (revenueRes.data.success) setRevenueAnalytics(revenueRes.data.data);
+      if (trendsRes.data.success) setTrends(trendsRes.data.data || []);
     } catch (error) {
       console.error('Error fetching analytics:', error);
+      toast.error('Unable to load analytics data.');
     } finally {
       setLoading(false);
     }
@@ -81,14 +69,11 @@ export function Analytics() {
         description="Comprehensive system analytics and insights"
         actions={
           <>
-            <Button variant="outline">
-              <Calendar className="w-4 h-4 mr-2" />
-              Date Range
-            </Button>
-            <Button className="bg-navy-600 hover:bg-navy-700">
-              <Download className="w-4 h-4 mr-2" />
-              Export Report
-            </Button>
+            <Select value={months} onValueChange={setMonths}>
+              <SelectTrigger className="w-[170px] bg-white"><Calendar className="mr-2 size-4 text-slate-500" /><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="6">Last 6 months</SelectItem><SelectItem value="12">Last 12 months</SelectItem><SelectItem value="24">Last 24 months</SelectItem></SelectContent>
+            </Select>
+            <Button variant="outline" onClick={fetchAllAnalytics} disabled={loading}><RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button>
           </>
         }
       />
@@ -113,7 +98,7 @@ export function Analytics() {
             </div>
             <div className="bg-white rounded-lg shadow p-6">
               <div className="text-slate-600 text-sm">Total Revenue</div>
-              <div className="text-3xl font-bold text-slate-900 mt-2">${overview.totalRevenue?.toFixed(2) || '0.00'}</div>
+              <div className="text-3xl font-bold text-slate-900 mt-2">{formatPlatformCurrency(overview.totalRevenue)}</div>
             </div>
           </div>
         )}
@@ -183,8 +168,8 @@ export function Analytics() {
                 <LineChart data={revenueAnalytics.monthly}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="month" stroke="#64748b" />
-                  <YAxis stroke="#64748b" />
-                  <Tooltip />
+                  <YAxis stroke="#64748b" tickFormatter={(value) => formatPlatformCurrency(Number(value))} />
+                  <Tooltip formatter={(value) => formatPlatformCurrency(Number(value))} />
                   <Line type="monotone" dataKey="revenue" stroke="#1e293b" strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>

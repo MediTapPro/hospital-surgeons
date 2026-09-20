@@ -14,12 +14,16 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface Assignment {
   id: string;
-  hospital: { id: string; name: string };
+  source: 'home_visit' | 'hospital_assignment';
+  hospital: { id: string; name: string } | null;
   doctor: { id: string; name: string };
   patient: { id: string; name: string };
+  visit?: { addressLabel?: string | null; address?: string | null; recipientPhone?: string | null; relationship?: string | null } | null;
   priority: string;
   status: string;
   requestedAt: string;
@@ -35,7 +39,8 @@ export function AssignmentsMonitor() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -45,14 +50,14 @@ export function AssignmentsMonitor() {
   useEffect(() => {
     fetchAssignments();
     fetchStats();
-  }, [activeTab, searchQuery, page]);
+  }, [activeTab, searchQuery, page, pageSize]);
 
   const fetchAssignments = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '10',
+        limit: pageSize.toString(),
       });
       if (activeTab !== 'all') {
         params.append('status', activeTab);
@@ -61,12 +66,11 @@ export function AssignmentsMonitor() {
         params.append('search', searchQuery);
       }
 
-      const res = await fetch(`/api/admin/assignments?${params.toString()}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/assignments?${params.toString()}`);
 
       if (data.success) {
         setAssignments(data.data || []);
-        setTotalPages(data.pagination?.totalPages || 1);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error(data.message || 'Failed to fetch assignments');
       }
@@ -80,8 +84,7 @@ export function AssignmentsMonitor() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/admin/assignments/stats');
-      const data = await res.json();
+      const { data } = await apiClient.get('/api/admin/assignments/stats');
 
       if (data.success) {
         setStats(data.data);
@@ -93,8 +96,7 @@ export function AssignmentsMonitor() {
 
   const fetchAssignmentDetails = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/assignments/${id}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/assignments/${id}`);
 
       if (data.success) {
         setSelectedAssignment(data.data);
@@ -115,16 +117,10 @@ export function AssignmentsMonitor() {
 
     try {
       setUpdating(true);
-      const res = await fetch(`/api/admin/assignments/${selectedAssignment.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data } = await apiClient.put(`/api/admin/assignments/${selectedAssignment.id}`, {
           status: statusUpdate,
           treatmentNotes: treatmentNotes || undefined,
-        }),
       });
-
-      const data = await res.json();
 
       if (data.success) {
         toast.success('Assignment updated successfully');
@@ -145,11 +141,21 @@ export function AssignmentsMonitor() {
   // Use assignments directly from API (already filtered on backend)
   const filteredAssignments = assignments;
 
+  const columns: AdminDataTableColumn<Assignment>[] = [
+    { id: 'source', label: 'Source', widthClassName: 'w-[170px]', cell: (row) => <StatusBadge status={row.source === 'home_visit' ? 'home visit' : 'hospital'} /> },
+    { id: 'provider', label: 'Doctor', widthClassName: 'w-[230px]', cell: (row) => <span className="font-medium text-slate-900">{row.doctor.name}</span> },
+    { id: 'patient', label: 'Patient', widthClassName: 'w-[220px]', cell: (row) => <span>{row.patient.name}</span> },
+    { id: 'requested', label: 'Requested', widthClassName: 'w-[150px]', cell: (row) => <span>{new Date(row.requestedAt).toLocaleDateString()}</span> },
+    { id: 'priority', label: 'Priority', widthClassName: 'w-[130px]', cell: (row) => <StatusBadge status={row.priority} /> },
+    { id: 'status', label: 'Status', widthClassName: 'w-[140px]', cell: (row) => <StatusBadge status={row.status} /> },
+    { id: 'actions', label: 'Actions', widthClassName: 'w-[100px]', sticky: 'right', headerClassName: 'text-center', cellClassName: 'text-center', cell: (row) => <Button size="sm" variant="ghost" aria-label="View assignment" onClick={() => fetchAssignmentDetails(row.id)}><Eye className="h-4 w-4" /></Button> },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50">
       <PageHeader 
         title="Assignments Monitor" 
-        description="Track and manage doctor-hospital assignments"
+        description="Track hospital assignments and patient home visits"
       />
 
       <div className="p-8 space-y-8">
@@ -218,81 +224,22 @@ export function AssignmentsMonitor() {
                   <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-slate-600">Hospital</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Doctor</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Patient</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Requested</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Priority</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                        <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {filteredAssignments.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                            No assignments found
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredAssignments.map((assignment) => (
-                          <tr key={assignment.id} className="hover:bg-slate-50">
-                            <td className="px-6 py-4 text-slate-900">{assignment.hospital.name}</td>
-                            <td className="px-6 py-4 text-slate-900">{assignment.doctor.name}</td>
-                            <td className="px-6 py-4 text-slate-600">{assignment.patient.name}</td>
-                            <td className="px-6 py-4 text-slate-600">
-                              {new Date(assignment.requestedAt).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4">
-                              <StatusBadge status={assignment.priority} />
-                            </td>
-                            <td className="px-6 py-4">
-                              <StatusBadge status={assignment.status} />
-                            </td>
-                            <td className="px-6 py-4">
-                              <Button 
-                                size="sm" 
-                                variant="ghost"
-                                onClick={() => fetchAssignmentDetails(assignment.id)}
-                              >
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                  {/* Pagination */}
-                  {!loading && totalPages > 1 && (
-                    <div className="p-4 border-t border-slate-200 flex items-center justify-between">
-                      <div className="text-sm text-slate-600">
-                        Page {page} of {totalPages}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPage(p => Math.max(1, p - 1))}
-                          disabled={page === 1}
-                        >
-                          Previous
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                          disabled={page === totalPages}
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                <div>
+                  <AdminDataTable
+                    columns={columns}
+                    data={filteredAssignments}
+                    emptyMessage="No assignments found"
+                    getRowKey={(row) => row.id}
+                    minWidthClassName="min-w-[1110px]"
+                    pagination={{
+                      page,
+                      pageSize,
+                      total: totalCount,
+                      onPageChange: setPage,
+                      onPageSizeChange: (size) => { setPageSize(size); setPage(1); },
+                      disabled: loading,
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -310,8 +257,8 @@ export function AssignmentsMonitor() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Hospital</Label>
-                  <p className="text-slate-900 mt-1">{selectedAssignment.hospital.name}</p>
+                  <Label>Source</Label>
+                  <p className="mt-1"><StatusBadge status={selectedAssignment.source === 'home_visit' ? 'home visit' : 'hospital'} /></p>
                 </div>
                 <div>
                   <Label>Doctor</Label>
@@ -321,6 +268,17 @@ export function AssignmentsMonitor() {
                   <Label>Patient</Label>
                   <p className="text-slate-900 mt-1">{selectedAssignment.patient.name}</p>
                 </div>
+                {selectedAssignment.source === 'home_visit' ? (
+                  <div className="col-span-2 rounded-lg border border-teal-100 bg-teal-50/50 p-4">
+                    <Label>Visit address</Label>
+                    <p className="mt-1 text-slate-900">{selectedAssignment.visit?.address || 'Address not available'}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Hospital</Label>
+                    <p className="mt-1 text-slate-900">{selectedAssignment.hospital?.name || 'Unknown'}</p>
+                  </div>
+                )}
                 <div>
                   <Label>Priority</Label>
                   <p className="mt-1">

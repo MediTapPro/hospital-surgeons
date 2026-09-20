@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2, CreditCard, Loader2 } from 'lucide-react';
+import type { ComponentProps } from 'react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api/httpClient';
 import { PageHeader } from '../_components/PageHeader';
 import { Button } from '../_components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../_components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../_components/ui/alert-dialog';
+import { AdminDataTable, type AdminDataTableColumn } from '../_components/ui/AdminDataTable';
+import { StatusBadge } from '../_components/StatusBadge';
+import { formatPlatformCurrency } from '@/lib/utils/constants';
 
 type Payment = {
   id: string;
@@ -20,7 +24,7 @@ type Payment = {
   patient: string;
 };
 
-type Pagination = { page: number; total: number; totalPages: number };
+type Pagination = { page: number; limit: number; total: number; totalPages: number };
 
 const PAYMENT_SOURCE_ALL = 'all';
 const SETTLEMENT_STATUS_ALL = 'all';
@@ -63,47 +67,40 @@ function PaymentFilters({ source, status, onSourceChange, onStatusChange }: {
   );
 }
 
-function PaymentsTable({ payments, loading, onSettle }: { payments: Payment[]; loading: boolean; onSettle: (payment: Payment) => void }) {
-  if (loading) {
-    return <div className="flex min-h-64 items-center justify-center"><Loader2 className="size-7 animate-spin text-teal-600" aria-label="Loading payments" /></div>;
-  }
-  if (payments.length === 0) {
-    return <div className="px-6 py-16 text-center text-slate-500"><CreditCard className="mx-auto mb-3 size-10 text-slate-300" />No payment records found.</div>;
-  }
-  return (
-    <table className="min-w-full text-sm">
-      <thead className="bg-slate-50 text-left text-slate-600">
-        <tr><th className="px-4 py-3">Source</th><th className="px-4 py-3">Doctor</th><th className="px-4 py-3">Patient</th><th className="px-4 py-3">Fee</th><th className="px-4 py-3">Patient payment</th><th className="px-4 py-3">Settlement</th><th className="px-4 py-3">Action</th></tr>
-      </thead>
-      <tbody className="divide-y divide-slate-100">
-        {payments.map((payment) => (
-          <tr key={payment.id}>
-            <td className="px-4 py-3 font-medium">{payment.paymentSource === 'home_visit' ? 'Home visit' : 'Hospital assignment'}</td>
-            <td className="px-4 py-3">{payment.doctor}</td><td className="px-4 py-3">{payment.patient}</td>
-            <td className="px-4 py-3">₹{payment.consultationFee.toFixed(2)}</td>
-            <td className="px-4 py-3">{payment.paymentSource === 'home_visit' ? formatStatus(payment.patientPaymentStatus) : '—'}</td>
-            <td className="px-4 py-3">{formatStatus(payment.paymentStatus)}</td>
-            <td className="px-4 py-3">
-              {payment.paymentSource === 'home_visit' && payment.paymentStatus === 'pending' && payment.patientPaymentStatus === 'paid' ? (
-                <Button size="sm" className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700" onClick={() => onSettle(payment)}>
-                  <CheckCircle2 className="size-3.5" /> Pay ₹{payment.doctorPayout.toFixed(2)}
-                </Button>
-              ) : '—'}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+function PaymentsTable({ payments, onSettle, pagination }: { payments: Payment[]; onSettle: (payment: Payment) => void; pagination: ComponentProps<typeof AdminDataTable>['pagination'] }) {
+  const columns: AdminDataTableColumn<Payment>[] = [
+    { id: 'source', label: 'Source', widthClassName: 'w-[180px]', cell: (payment) => <StatusBadge status={payment.paymentSource === 'home_visit' ? 'home visit' : 'hospital'} /> },
+    { id: 'doctor', label: 'Doctor', widthClassName: 'w-[220px]', cell: (payment) => <span className="font-medium text-slate-900">{payment.doctor}</span> },
+    { id: 'patient', label: 'Patient', widthClassName: 'w-[200px]', cell: (payment) => payment.patient },
+    { id: 'fee', label: 'Fee', widthClassName: 'w-[140px]', cell: (payment) => formatPlatformCurrency(payment.consultationFee) },
+    { id: 'patient-payment', label: 'Patient payment', widthClassName: 'w-[170px]', cell: (payment) => payment.paymentSource === 'home_visit' ? formatStatus(payment.patientPaymentStatus) : '—' },
+    { id: 'settlement', label: 'Settlement', widthClassName: 'w-[150px]', cell: (payment) => <StatusBadge status={payment.paymentStatus} /> },
+    {
+      id: 'action',
+      label: 'Action',
+      widthClassName: 'w-[220px]',
+      sticky: 'right',
+      cell: (payment) => {
+        if (payment.paymentSource !== 'home_visit') return <span className="text-slate-400">Not applicable</span>;
+        if (payment.paymentStatus === 'completed') return <span className="font-medium text-emerald-600">Paid</span>;
+        if (payment.paymentStatus !== 'pending') return <span className="text-slate-500">Unavailable</span>;
+        if (payment.patientPaymentStatus !== 'paid') return <span className="text-amber-600">Awaiting patient payment</span>;
+        return <Button size="sm" className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700" onClick={() => onSettle(payment)}><CheckCircle2 className="size-3.5" /> Pay {formatPlatformCurrency(payment.doctorPayout)}</Button>;
+      },
+    },
+  ];
+
+  return <AdminDataTable columns={columns} data={payments} emptyMessage="No payment records found" getRowKey={(payment) => payment.id} minWidthClassName="min-w-[1250px]" pagination={pagination} />;
 }
 
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [source, setSource] = useState(PAYMENT_SOURCE_ALL);
   const [status, setStatus] = useState(SETTLEMENT_STATUS_ALL);
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [paymentToSettle, setPaymentToSettle] = useState<Payment | null>(null);
   const [settling, setSettling] = useState(false);
 
@@ -111,7 +108,7 @@ export default function AdminPaymentsPage() {
     async function loadPayments() {
       try {
         setLoading(true);
-        const response = await apiClient.get('/api/admin/payments', { params: { page, source: source === PAYMENT_SOURCE_ALL ? undefined : source, status: status === SETTLEMENT_STATUS_ALL ? undefined : status } });
+        const response = await apiClient.get('/api/admin/payments', { params: { page, limit: pageSize, source: source === PAYMENT_SOURCE_ALL ? undefined : source, status: status === SETTLEMENT_STATUS_ALL ? undefined : status } });
         if (!response.data.success) throw new Error(response.data.message || 'Unable to load payment records.');
         setPayments(response.data.data);
         setPagination(response.data.pagination);
@@ -122,7 +119,7 @@ export default function AdminPaymentsPage() {
       }
     }
     loadPayments();
-  }, [page, source, status]);
+  }, [page, pageSize, source, status]);
 
   const resetPage = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
 
@@ -147,14 +144,8 @@ export default function AdminPaymentsPage() {
       <PageHeader title="Payments" description="Hospital settlements and patient home-visit collections." />
       <div className="mt-6 space-y-4">
         <PaymentFilters source={source} status={status} onSourceChange={resetPage(setSource)} onStatusChange={resetPage(setStatus)} />
-        <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <PaymentsTable payments={payments} loading={loading} onSettle={setPaymentToSettle} />
-          {pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between border-t border-slate-100 p-4">
-              <span className="text-sm text-slate-500">Page {pagination.page} of {pagination.totalPages} · {pagination.total} records</span>
-              <div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button></div>
-            </div>
-          )}
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          {loading ? <div className="flex min-h-64 items-center justify-center"><Loader2 className="size-7 animate-spin text-teal-600" aria-label="Loading payments" /></div> : <PaymentsTable payments={payments} onSettle={setPaymentToSettle} pagination={{ page: pagination.page, pageSize, pageSizeOptions: [10, 20, 50], total: pagination.total, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }} />}
         </section>
       </div>
       <AlertDialog open={Boolean(paymentToSettle)} onOpenChange={(open) => !open && setPaymentToSettle(null)}>

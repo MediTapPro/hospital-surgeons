@@ -10,6 +10,8 @@ import { StatusBadge } from '../StatusBadge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from 'sonner';
 import Link from 'next/link';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface ScheduleUpdate {
   id: string;
@@ -62,7 +64,8 @@ export function ScheduleUpdates() {
   const [updates, setUpdates] = useState<ScheduleUpdate[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Filters
   const [doctorSearch, setDoctorSearch] = useState<string>('');
@@ -86,14 +89,14 @@ export function ScheduleUpdates() {
 
   useEffect(() => {
     fetchUpdates();
-  }, [page, appliedFilters]);
+  }, [page, pageSize, appliedFilters]);
 
   const fetchUpdates = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '20',
+        limit: pageSize.toString(),
       });
 
       if (appliedFilters.doctorSearch) {
@@ -109,12 +112,11 @@ export function ScheduleUpdates() {
         params.append('endDate', appliedFilters.endDate);
       }
 
-      const res = await fetch(`/api/admin/schedule-updates?${params.toString()}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/schedule-updates?${params.toString()}`);
 
       if (data.success) {
         setUpdates(data.data || []);
-        setTotalPages(data.pagination?.totalPages || 1);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error(data.message || 'Failed to fetch schedule updates');
       }
@@ -156,8 +158,7 @@ export function ScheduleUpdates() {
       setSelectedParentSlotId(parentSlotId);
       setShowModal(true);
 
-      const res = await fetch(`/api/admin/schedule-updates/parent-slot/${parentSlotId}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/schedule-updates/parent-slot/${parentSlotId}`);
 
       if (data.success) {
         setParentSlotDetail(data.data);
@@ -198,6 +199,16 @@ export function ScheduleUpdates() {
       minute: '2-digit',
     });
   };
+
+  const columns: AdminDataTableColumn<ScheduleUpdate>[] = [
+    { id: 'updatedAt', label: 'Updated at', widthClassName: 'w-[190px]', cell: (update) => <span className="text-sm text-slate-600">{formatDateTime(update.updatedAt)}</span> },
+    { id: 'doctor', label: 'Doctor', widthClassName: 'w-[220px]', cell: (update) => <span className="font-medium text-slate-900">{update.doctorName}</span> },
+    { id: 'date', label: 'Date', widthClassName: 'w-[150px]', cell: (update) => formatDate(update.slotDate) },
+    { id: 'time', label: 'Time range', widthClassName: 'w-[190px]', cell: (update) => `${formatTime(update.startTime)} - ${formatTime(update.endTime)}` },
+    { id: 'status', label: 'Status', widthClassName: 'w-[140px]', cell: (update) => <StatusBadge status={update.status} /> },
+    { id: 'source', label: 'Source', widthClassName: 'w-[130px]', cell: (update) => update.isManual ? 'Manual' : 'Template' },
+    { id: 'actions', label: 'Actions', widthClassName: 'w-[170px]', sticky: 'right', cell: (update) => <Button variant="ghost" size="sm" onClick={() => handleViewParentSlot(update.id)} className="text-teal-600 hover:text-teal-700"><Eye className="mr-1 h-4 w-4" />View sub-slots</Button> },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -295,87 +306,7 @@ export function ScheduleUpdates() {
               <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-slate-600">Updated At</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Doctor</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Date</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Time Range</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Status</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Source</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {updates.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                        No schedule updates found
-                      </td>
-                    </tr>
-                  ) : (
-                    updates.map((update) => (
-                      <tr key={update.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4 text-slate-600 text-sm">
-                          {formatDateTime(update.updatedAt)}
-                        </td>
-                        <td className="px-6 py-4 text-slate-900">{update.doctorName}</td>
-                        <td className="px-6 py-4 text-slate-600">{formatDate(update.slotDate)}</td>
-                        <td className="px-6 py-4 text-slate-600">
-                          {formatTime(update.startTime)} - {formatTime(update.endTime)}
-                        </td>
-                        <td className="px-6 py-4">
-                          <StatusBadge status={update.status} />
-                        </td>
-                        <td className="px-6 py-4 text-slate-600 text-sm">
-                          {update.isManual ? 'Manual' : 'Template'}
-                        </td>
-                        <td className="px-6 py-4">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewParentSlot(update.id)}
-                            className="text-teal-600 hover:text-teal-700"
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View Sub-slots
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-              <div className="text-sm text-slate-600">
-                Page {page} of {totalPages}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            <AdminDataTable columns={columns} data={updates} emptyMessage="No schedule updates found" getRowKey={(update) => update.id} minWidthClassName="min-w-[1150px]" pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }} />
           )}
         </div>
       </div>
@@ -492,4 +423,3 @@ export function ScheduleUpdates() {
     </div>
   );
 }
-

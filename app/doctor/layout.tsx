@@ -4,11 +4,13 @@ import type { ReactNode } from "react";
 import { DoctorSidebar } from "./_components/Sidebar";
 import { Toaster } from "sonner";
 import { useState } from "react";
+import { PortalModeGate } from '@/app/_components/PortalModeGate';
 
 export default function DoctorLayout({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
+    <PortalModeGate>
     <div className="flex min-h-screen bg-slate-50" style={{ backgroundImage: 'none' }}>
       <DoctorSidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main 
@@ -23,6 +25,6 @@ export default function DoctorLayout({ children }: { children: ReactNode }) {
       </main>
       <Toaster />
     </div>
+    </PortalModeGate>
   );
 }
-

@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isAuthenticated, getUserRole } from '@/lib/auth/utils';
 import { Toaster } from 'sonner';
+import { PortalModeGate } from '@/app/_components/PortalModeGate';
 
 export default function PatientLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -32,9 +33,11 @@ export default function PatientLayout({ children }: { children: ReactNode }) {
   }
 
   return (
+    <PortalModeGate>
     <div className="min-h-screen bg-slate-50/50">
       {children}
       <Toaster position="top-right" richColors />
     </div>
+    </PortalModeGate>
   );
 }

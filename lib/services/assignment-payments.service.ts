@@ -10,6 +10,7 @@ import {
   ASSIGNMENT_PAYMENTS_DEFAULT_LIMIT,
   ASSIGNMENT_PAYMENTS_MAX_LIMIT,
 } from '@/lib/utils/constants';
+import { createAuditLog, type AuditLogData } from '@/lib/utils/audit-logger';
 
 export class AssignmentPaymentsService {
   constructor(private readonly repository = new AssignmentPaymentsRepository()) {}
@@ -50,11 +51,11 @@ export class AssignmentPaymentsService {
     return { ...result, ...earnings };
   }
 
-  async markSettlementPaid(paymentId: string) {
+  async markSettlementPaid(input: { paymentId: string; actorId: string; requestMetadata?: Pick<AuditLogData, 'ipAddress' | 'userAgent' | 'endpoint'> }) {
     const db = getDb();
     return await db.transaction(async (tx) => {
       const repository = new AssignmentPaymentsRepository(tx);
-      const payment = await repository.findSettlementById(paymentId, tx);
+      const payment = await repository.findSettlementById(input.paymentId, tx);
 
       if (!payment) return { success: false as const, code: 'PAYMENT_NOT_FOUND' };
       if (payment.paymentSource !== 'home_visit') return { success: false as const, code: 'UNSUPPORTED_PAYMENT_SOURCE' };
@@ -63,8 +64,18 @@ export class AssignmentPaymentsService {
         return { success: false as const, code: 'PATIENT_PAYMENT_NOT_PAID' };
       }
 
-      const [updatedPayment] = await repository.markSettlementPaid(paymentId, tx);
+      const [updatedPayment] = await repository.markSettlementPaid(input.paymentId, tx);
       if (!updatedPayment) return { success: false as const, code: 'SETTLEMENT_NOT_PENDING' };
+
+      await createAuditLog({
+        userId: input.actorId,
+        actorType: 'admin',
+        action: 'settle',
+        entityType: 'assignment_payment',
+        entityId: input.paymentId,
+        details: { paymentSource: payment.paymentSource, patientPaymentStatus: payment.patientPaymentStatus },
+        ...input.requestMetadata,
+      }, tx, { throwOnError: true });
 
       return { success: true as const, data: updatedPayment };
     });

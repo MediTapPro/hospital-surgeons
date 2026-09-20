@@ -36,7 +36,8 @@ export function SpecialtiesManagement() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(SPECIALTY_LIST_DEFAULT_LIMIT);
+  const [totalCount, setTotalCount] = useState(0);
   const [isCreating, setIsCreating] = useState(false);
   const [formData, setFormData] = useState({ name: '', description: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -47,14 +48,14 @@ export function SpecialtiesManagement() {
 
   useEffect(() => {
     fetchSpecialties();
-  }, [page, searchQuery]);
+  }, [page, pageSize, searchQuery]);
 
   const fetchSpecialties = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: SPECIALTY_LIST_DEFAULT_LIMIT.toString(),
+        limit: pageSize.toString(),
       });
       if (searchQuery) {
         params.append('search', searchQuery);
@@ -65,7 +66,7 @@ export function SpecialtiesManagement() {
 
       if (data.success) {
         setSpecialties(data.data || []);
-        setTotalPages(data.pagination?.totalPages || 1);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error(data.message || 'Failed to fetch specialties');
       }
@@ -300,33 +301,8 @@ export function SpecialtiesManagement() {
                 emptyMessage="No specialties found"
                 getRowKey={(specialty) => specialty.id}
                 minWidthClassName="min-w-[980px]"
+                pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }}
               />
-            )}
-
-            {!loading && totalPages > 1 && (
-              <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-slate-600">
-                  Page {page} of {totalPages}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={page === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                    disabled={page === totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
             )}
           </div>
         </div>

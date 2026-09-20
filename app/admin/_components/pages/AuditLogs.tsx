@@ -4,9 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Search, Filter, Download, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { Search, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
 
 interface AuditLog {
   id: string;
@@ -30,18 +32,20 @@ export function AuditLogs() {
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
 
   useEffect(() => {
     fetchLogs();
-  }, [actorTypeFilter, actionFilter, entityTypeFilter, page]);
+  }, [actorTypeFilter, actionFilter, entityTypeFilter, searchQuery, page, pageSize]);
 
   const fetchLogs = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '20',
+        limit: pageSize.toString(),
+        search: searchQuery.trim(),
       });
       if (actorTypeFilter !== 'all') {
         params.append('actorType', actorTypeFilter);
@@ -53,12 +57,11 @@ export function AuditLogs() {
         params.append('entityType', entityTypeFilter);
       }
 
-      const res = await fetch(`/api/admin/audit-logs?${params.toString()}`);
-      const data = await res.json();
+      const { data } = await apiClient.get(`/api/admin/audit-logs?${params.toString()}`);
 
       if (data.success) {
         setLogs(data.data || []);
-        setTotalPages(data.pagination?.totalPages || 1);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error(data.message || 'Failed to fetch audit logs');
       }
@@ -70,55 +73,19 @@ export function AuditLogs() {
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (actorTypeFilter !== 'all') params.append('actorType', actorTypeFilter);
-      if (actionFilter !== 'all') params.append('action', actionFilter);
-      if (entityTypeFilter !== 'all') params.append('entityType', entityTypeFilter);
-      params.append('format', 'csv');
-
-      const res = await fetch(`/api/admin/audit-logs/export?${params.toString()}`);
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      toast.success('Audit logs exported successfully');
-    } catch (error) {
-      console.error('Error exporting audit logs:', error);
-      toast.error('Failed to export audit logs');
-    }
-  };
-
-  const filteredLogs = logs.filter((log) => {
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        log.action.toLowerCase().includes(query) ||
-        log.entityType.toLowerCase().includes(query) ||
-        log.userEmail?.toLowerCase().includes(query) ||
-        JSON.stringify(log.details).toLowerCase().includes(query)
-      );
-    }
-    return true;
-  });
+  const columns: AdminDataTableColumn<AuditLog>[] = [
+    { id: 'timestamp', label: 'Timestamp', widthClassName: 'w-[190px]', cell: (log) => <span className="text-sm text-slate-600">{new Date(log.createdAt).toLocaleString()}</span> },
+    { id: 'actor', label: 'Actor', widthClassName: 'w-[220px]', cell: (log) => <div><div className="font-medium text-slate-900">{log.userEmail || 'System'}</div><div className="text-xs capitalize text-slate-500">{log.actorType}</div></div> },
+    { id: 'action', label: 'Action', widthClassName: 'w-[180px]', cell: (log) => <span className="font-medium text-slate-900">{log.action.replaceAll('_', ' ')}</span> },
+    { id: 'entity', label: 'Entity', widthClassName: 'w-[200px]', cell: (log) => { const source = log.details?.source || log.details?.paymentSource; const isHomeVisit = source === 'home_visit'; return <div><div className="flex items-center gap-2 text-slate-900"><span>{log.entityType}</span>{isHomeVisit && <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700">Home visit</span>}</div>{log.entityId && <div className="font-mono text-xs text-slate-500">{log.entityId.substring(0, 8)}…</div>}</div>; } },
+    { id: 'details', label: 'Details', widthClassName: 'w-[420px]', cell: (log) => <div>{expandedLog === log.id ? <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs text-slate-700">{JSON.stringify(log.details, null, 2)}</pre> : <Button size="sm" variant="ghost" onClick={() => setExpandedLog(log.id)}><ChevronDown className="mr-1 h-4 w-4" />View</Button>}{expandedLog === log.id && <Button size="sm" variant="ghost" onClick={() => setExpandedLog(null)}><ChevronUp className="mr-1 h-4 w-4" />Hide</Button>}</div> },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50">
       <PageHeader 
         title="Audit Logs" 
         description="Track all system activities and changes"
-        actions={
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="w-4 h-4 mr-2" />
-            Export Logs
-          </Button>
-        }
       />
 
       <div className="p-8">
@@ -212,107 +179,7 @@ export function AuditLogs() {
               <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-slate-600">Timestamp</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Actor</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Action</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Entity</th>
-                    <th className="px-6 py-3 text-left text-slate-600">Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {filteredLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                        No audit logs found
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredLogs.map((log) => (
-                      <React.Fragment key={log.id}>
-                        <tr className="hover:bg-slate-50">
-                          <td className="px-6 py-4 text-slate-600">
-                            {new Date(log.createdAt).toLocaleString()}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div>
-                              <div className="text-slate-900">{log.userEmail || 'System'}</div>
-                              <div className="text-slate-500 text-sm">{log.actorType}</div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-slate-900">{log.action}</td>
-                          <td className="px-6 py-4">
-                            <div>
-                              <div className="text-slate-900">{log.entityType}</div>
-                              {log.entityId && (
-                                <div className="text-slate-500 text-sm">{log.entityId.substring(0, 8)}...</div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)}
-                            >
-                              {expandedLog === log.id ? (
-                                <>
-                                  <ChevronUp className="w-4 h-4 mr-1" />
-                                  Hide
-                                </>
-                              ) : (
-                                <>
-                                  <ChevronDown className="w-4 h-4 mr-1" />
-                                  View
-                                </>
-                              )}
-                            </Button>
-                          </td>
-                        </tr>
-                        {expandedLog === log.id && (
-                          <tr key={`${log.id}-details`}>
-                            <td colSpan={5} className="px-6 py-4 bg-slate-50">
-                              <pre className="text-slate-700 overflow-x-auto text-sm">
-                                {JSON.stringify(log.details, null, 2)}
-                              </pre>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))
-                  )}
-                </tbody>
-              </table>
-              {/* Pagination */}
-              {!loading && totalPages > 1 && (
-                <div className="p-4 border-t border-slate-200 flex items-center justify-between">
-                  <div className="text-sm text-slate-600">
-                    Page {page} of {totalPages}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      disabled={page === totalPages}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <AdminDataTable columns={columns} data={logs} emptyMessage="No audit logs found" getRowKey={(log) => log.id} minWidthClassName="min-w-[1200px]" pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }} />
           )}
         </div>
       </div>

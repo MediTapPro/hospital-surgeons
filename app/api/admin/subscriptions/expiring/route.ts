@@ -19,7 +19,9 @@ async function getHandler(req: AuthenticatedRequest) {
   try {
     const rawDays = Number(req.nextUrl.searchParams.get('days') || 7);
     const days = Math.min(365, Math.max(1, Number.isFinite(rawDays) ? rawDays : 7));
-    const data = await service.listExpiring(days);
+    const role = req.nextUrl.searchParams.get('role');
+    const userRole = role === 'doctor' || role === 'hospital' ? role : undefined;
+    const data = await service.listExpiring(days, userRole);
     return NextResponse.json({ success: true, data, count: data.length });
   } catch (error) {
     console.error('Error fetching expiring subscriptions:', error);

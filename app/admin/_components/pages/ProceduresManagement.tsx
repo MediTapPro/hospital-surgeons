@@ -72,6 +72,8 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
   const [activeTab, setActiveTab] = useState(defaultTab === 'details' ? 'specialty' : defaultTab);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(10);
 
   // Data
   const [specialties, setSpecialties] = useState<Specialty[]>([]);
@@ -214,6 +216,7 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
+    setTablePage(1);
     fetchCategories(value);
     fetchProcedures(value);
   };
@@ -505,7 +508,7 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
       )}
 
       <div className={hideHeader ? '' : 'p-8'}>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className={`overflow-hidden rounded-xl border border-slate-200 bg-white ${hideHeader ? 'shadow-sm' : 'shadow-sm min-h-[600px]'}`}>
+        <Tabs value={activeTab} onValueChange={(value) => { setActiveTab(value); setTablePage(1); }} className={`overflow-hidden rounded-xl border border-slate-200 bg-white ${hideHeader ? 'shadow-sm' : 'shadow-sm min-h-[600px]'}`}>
           <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
               <TabsList className="h-auto bg-slate-100 p-1">
@@ -563,6 +566,7 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
                   emptyMessage="No specialty found"
                   getRowKey={(item) => item.id}
                   minWidthClassName="min-w-[640px]"
+                  pagination={{ client: true, page: tablePage, pageSize: tablePageSize, total: specialties.filter(s => s.id === specialtyId).length, onPageChange: setTablePage, onPageSizeChange: (size) => { setTablePageSize(size); setTablePage(1); }, disabled: loading }}
                 />
               )
             ) : (
@@ -599,6 +603,7 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
                   emptyMessage="No categories found"
                   getRowKey={(item) => item.id}
                   minWidthClassName={specialtyId ? 'min-w-[760px]' : 'min-w-[960px]'}
+                  pagination={{ client: true, page: tablePage, pageSize: tablePageSize, total: categories.length, onPageChange: setTablePage, onPageSizeChange: (size) => { setTablePageSize(size); setTablePage(1); }, disabled: loading }}
                 />
               )
             ) : (
@@ -635,6 +640,7 @@ export function ProceduresManagement({ specialtyId, specialtyName, hideHeader = 
                   emptyMessage="No procedures found"
                   getRowKey={(item) => item.id}
                   minWidthClassName={specialtyId ? 'min-w-[900px]' : 'min-w-[1100px]'}
+                  pagination={{ client: true, page: tablePage, pageSize: tablePageSize, total: procedures.length, onPageChange: setTablePage, onPageSizeChange: (size) => { setTablePageSize(size); setTablePage(1); }, disabled: loading }}
                 />
               )
             ) : (

@@ -6,6 +6,8 @@ import {
   HomeVisitSettingsRepository,
   type HomeVisitSettingsValues,
 } from '@/lib/repositories/home-visit-settings.repository';
+import { getDb } from '@/lib/db';
+import { createAuditLog, type AuditLogData } from '@/lib/utils/audit-logger';
 
 const DEFAULT_HOME_VISIT_SETTINGS: HomeVisitSettingsValues = {
   homeVisitEnabled: true,
@@ -28,19 +30,9 @@ export class HomeVisitSettingsService {
       const settings = await this.repository.findGlobal(tx);
       const data = settings && settings.paidPaymentTiming === 'pay_after_completion'
         ? settings
-        : await this.repository.upsertGlobal(
-            settings
-              ? {
-                  homeVisitEnabled: settings.homeVisitEnabled,
-                  freeTrialEnabled: settings.freeTrialEnabled,
-                  freeTrialVisitLimit: settings.freeTrialVisitLimit,
-                  freeTrialActiveBookingLimit: settings.freeTrialActiveBookingLimit,
-                  paidPaymentTiming: DEFAULT_HOME_VISIT_SETTINGS.paidPaymentTiming,
-                  allowEarlyAssignmentCompletion: settings.allowEarlyAssignmentCompletion,
-                }
-              : DEFAULT_HOME_VISIT_SETTINGS,
-            tx
-          );
+        : settings
+          ? { ...settings, paidPaymentTiming: DEFAULT_HOME_VISIT_SETTINGS.paidPaymentTiming }
+          : DEFAULT_HOME_VISIT_SETTINGS;
 
       return {
         success: true,
@@ -55,7 +47,7 @@ export class HomeVisitSettingsService {
     }
   }
 
-  async updateSettings(values: HomeVisitSettingsValues) {
+  async updateSettings(values: HomeVisitSettingsValues, actor: { userId: string; requestMetadata?: Pick<AuditLogData, 'ipAddress' | 'userAgent' | 'endpoint'> }) {
     if (
       typeof values.homeVisitEnabled !== 'boolean'
       || typeof values.freeTrialEnabled !== 'boolean'
@@ -89,13 +81,23 @@ export class HomeVisitSettingsService {
     }
 
     try {
-      const data = await this.repository.upsertGlobal(values);
-
-      return {
-        success: true,
-        message: 'Home visit settings updated successfully',
-        data,
-      };
+      const db = getDb();
+      const data = await db.transaction(async (tx) => {
+        const repository = new HomeVisitSettingsRepository(tx);
+        const previous = await repository.findGlobal(tx);
+        const updated = await repository.upsertGlobal(values, tx);
+        await createAuditLog({
+          userId: actor.userId,
+          actorType: 'admin',
+          action: 'update',
+          entityType: 'platform_home_visit_settings',
+          entityId: updated.id,
+          details: { scope: updated.scope, previous: previous ? { homeVisitEnabled: previous.homeVisitEnabled, freeTrialEnabled: previous.freeTrialEnabled, freeTrialVisitLimit: previous.freeTrialVisitLimit, freeTrialActiveBookingLimit: previous.freeTrialActiveBookingLimit, paidPaymentTiming: previous.paidPaymentTiming, allowEarlyAssignmentCompletion: previous.allowEarlyAssignmentCompletion } : null },
+          ...actor.requestMetadata,
+        }, tx, { throwOnError: true });
+        return updated;
+      });
+      return { success: true, message: 'Home visit settings updated successfully', data };
     } catch (error) {
       return {
         success: false,

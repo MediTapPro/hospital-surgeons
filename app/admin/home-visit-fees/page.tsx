@@ -9,11 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../_components/ui/dialog';
 import { Loader2, Trash2, Edit, Plus, Percent, Coins } from 'lucide-react';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api/httpClient';
+import { formatPlatformCurrency } from '@/lib/utils/constants';
+import { AdminDataTable, type AdminDataTableColumn } from '../_components/ui/AdminDataTable';
+
+type Specialty = { id: string; name: string };
+type FeeConfig = { id: string; specialtyId: string | null; specialtyName?: string | null; fee: number | string; platformCommissionPercentage: number | string };
 
 export default function HomeVisitFeesPage() {
   // Home Visit Fees States
-  const [homeVisitFees, setHomeVisitFees] = useState<any[]>([]);
-  const [specialties, setSpecialties] = useState<any[]>([]);
+  const [homeVisitFees, setHomeVisitFees] = useState<FeeConfig[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [defaultFee, setDefaultFee] = useState<string>('0');
   const [defaultCommission, setDefaultCommission] = useState<string>('10');
   const [defaultConfigId, setDefaultConfigId] = useState<string | null>(null);
@@ -25,6 +31,8 @@ export default function HomeVisitFeesPage() {
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string>('');
   const [overrideFee, setOverrideFee] = useState<string>('');
   const [overrideCommission, setOverrideCommission] = useState<string>('');
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(10);
 
   useEffect(() => {
     fetchHomeVisitFees();
@@ -34,13 +42,7 @@ export default function HomeVisitFeesPage() {
   const fetchHomeVisitFees = async () => {
     try {
       setLoadingFees(true);
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const res = await fetch('/api/admin/home-visit-fees', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const data = await res.json();
+      const { data } = await apiClient.get('/api/admin/home-visit-fees');
       if (data.success && data.data) {
         setHomeVisitFees(data.data);
         
@@ -64,8 +66,7 @@ export default function HomeVisitFeesPage() {
 
   const fetchSpecialties = async () => {
     try {
-      const res = await fetch('/api/admin/specialties?limit=100');
-      const data = await res.json();
+      const { data } = await apiClient.get('/api/admin/specialties?limit=100');
       if (data.success && data.data) {
         setSpecialties(data.data);
       }
@@ -89,20 +90,11 @@ export default function HomeVisitFeesPage() {
 
     try {
       setSavingDefault(true);
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const res = await fetch('/api/admin/home-visit-fees', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const { data } = await apiClient.post('/api/admin/home-visit-fees', {
           specialtyId: null,
           fee: feeVal,
           platformCommissionPercentage: commVal,
-        }),
       });
-      const data = await res.json();
       if (data.success) {
         toast.success('Default platform fee configuration saved');
         fetchHomeVisitFees();
@@ -138,20 +130,11 @@ export default function HomeVisitFeesPage() {
 
     try {
       setSavingOverride(true);
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const res = await fetch('/api/admin/home-visit-fees', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const { data } = await apiClient.post('/api/admin/home-visit-fees', {
           specialtyId: editingFeeConfig ? editingFeeConfig.specialtyId : selectedSpecialtyId,
           fee: feeVal,
           platformCommissionPercentage: commVal,
-        }),
       });
-      const data = await res.json();
       if (data.success) {
         toast.success(editingFeeConfig ? 'Override updated successfully' : 'Override created successfully');
         setShowAddModal(false);
@@ -174,14 +157,7 @@ export default function HomeVisitFeesPage() {
   const handleDeleteOverride = async (id: string) => {
     if (!confirm('Are you sure you want to delete this specialty override?')) return;
     try {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const res = await fetch(`/api/admin/home-visit-fees/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const data = await res.json();
+      const { data } = await apiClient.delete(`/api/admin/home-visit-fees/${id}`);
       if (data.success) {
         toast.success('Specialty override deleted successfully');
         fetchHomeVisitFees();
@@ -193,6 +169,15 @@ export default function HomeVisitFeesPage() {
       toast.error('Error deleting override configuration');
     }
   };
+
+  const overrides = homeVisitFees.filter((feeConfig) => feeConfig.specialtyId !== null);
+  const columns: AdminDataTableColumn<FeeConfig>[] = [
+    { id: 'specialty', label: 'Specialty', widthClassName: 'w-[250px]', cell: (feeConfig) => <span className="font-medium text-slate-900">{feeConfig.specialtyName || specialties.find((specialty) => specialty.id === feeConfig.specialtyId)?.name || 'Unknown specialty'}</span> },
+    { id: 'fee', label: 'Consultation fee', widthClassName: 'w-[180px]', cell: (feeConfig) => formatPlatformCurrency(Number(feeConfig.fee)) },
+    { id: 'commission', label: 'Platform commission', widthClassName: 'w-[220px]', cell: (feeConfig) => { const fee = Number(feeConfig.fee); const percentage = Number(feeConfig.platformCommissionPercentage); return `${percentage.toFixed(1)}% (${formatPlatformCurrency(fee * percentage / 100)})`; } },
+    { id: 'doctor-share', label: 'Doctor share', widthClassName: 'w-[170px]', cell: (feeConfig) => { const fee = Number(feeConfig.fee); const percentage = Number(feeConfig.platformCommissionPercentage); return <span className="font-semibold text-emerald-600">{formatPlatformCurrency(fee * (1 - percentage / 100))}</span>; } },
+    { id: 'actions', label: 'Actions', widthClassName: 'w-[130px]', sticky: 'right', cell: (feeConfig) => <div className="flex items-center justify-center gap-2"><Button variant="outline" size="sm" onClick={() => { setEditingFeeConfig(feeConfig); setSelectedSpecialtyId(feeConfig.specialtyId || ''); setOverrideFee(Number(feeConfig.fee).toString()); setOverrideCommission(Number(feeConfig.platformCommissionPercentage).toString()); setShowAddModal(true); }} aria-label={`Edit ${feeConfig.specialtyName || 'specialty override'}`}><Edit className="h-3.5 w-3.5" /></Button><Button variant="outline" size="sm" onClick={() => handleDeleteOverride(feeConfig.id)} aria-label={`Delete ${feeConfig.specialtyName || 'specialty override'}`} className="border-red-100 text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /></Button></div> },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -297,71 +282,14 @@ export default function HomeVisitFeesPage() {
             <div className="py-12 flex justify-center items-center">
               <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
             </div>
-          ) : homeVisitFees.filter((f: any) => f.specialtyId !== null).length === 0 ? (
+          ) : overrides.length === 0 ? (
             <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
               <Coins className="w-12 h-12 mx-auto text-slate-300 mb-3" />
               <p className="text-slate-500 font-medium">No specialty overrides defined</p>
               <p className="text-slate-400 text-sm mt-1">Platform will use the default fallback fee configuration for all specialties.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 text-sm font-semibold">
-                    <th className="p-4">Specialty</th>
-                    <th className="p-4">Consultation Fee</th>
-                    <th className="p-4">Platform Commission</th>
-                    <th className="p-4">Doctor Share</th>
-                    <th className="p-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
-                  {homeVisitFees
-                    .filter((f: any) => f.specialtyId !== null)
-                    .map((feeConfig: any) => {
-                      const spec = specialties.find((s: any) => s.id === feeConfig.specialtyId);
-                      const fee = parseFloat(feeConfig.fee);
-                      const commPct = parseFloat(feeConfig.platformCommissionPercentage);
-                      const docShare = fee * (1 - commPct / 100);
-                      
-                      return (
-                        <tr key={feeConfig.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-4 font-medium text-slate-900">{spec ? spec.name : 'Unknown Specialty'}</td>
-                          <td className="p-4">₹{fee.toFixed(2)}</td>
-                          <td className="p-4">{commPct.toFixed(1)}% (₹{(fee * (commPct / 100)).toFixed(2)})</td>
-                          <td className="p-4 font-semibold text-emerald-600">₹{docShare.toFixed(2)}</td>
-                          <td className="p-4 text-right space-x-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingFeeConfig(feeConfig);
-                                setSelectedSpecialtyId(feeConfig.specialtyId);
-                                setOverrideFee(Number(feeConfig.fee).toString());
-                                setOverrideCommission(Number(feeConfig.platformCommissionPercentage).toString());
-                                setShowAddModal(true);
-                              }}
-                              className="border-slate-200 text-slate-700 hover:bg-slate-100 p-2 h-8"
-                              title="Edit Override"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeleteOverride(feeConfig.id)}
-                              className="border-red-100 text-red-600 hover:bg-red-50 hover:text-red-700 p-2 h-8"
-                              title="Delete Override"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
+            <AdminDataTable columns={columns} data={overrides} emptyMessage="No specialty overrides defined" getRowKey={(feeConfig) => feeConfig.id} minWidthClassName="min-w-[950px]" pagination={{ client: true, page: tablePage, pageSize: tablePageSize, total: overrides.length, onPageChange: setTablePage, onPageSizeChange: (size) => { setTablePageSize(size); setTablePage(1); }, disabled: loadingFees }} />
           )}
         </div>
       </div>

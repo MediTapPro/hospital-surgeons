@@ -1,11 +1,8 @@
-'use client';
-
-import { Analytics } from '../_components/pages/Analytics';
+import { redirect } from 'next/navigation';
 
 export default function AdminAnalyticsPage() {
-  return <Analytics />;
+  redirect('/admin');
 }
-
 
 
 

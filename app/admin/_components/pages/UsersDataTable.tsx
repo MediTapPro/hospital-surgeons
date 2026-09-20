@@ -1,4 +1,5 @@
 import { Eye, Loader2 } from 'lucide-react';
+import type { ComponentProps } from 'react';
 import { Button } from '../ui/button';
 import { StatusBadge } from '../StatusBadge';
 import { AdminDataTable, type AdminDataTableColumn } from '../ui/AdminDataTable';
@@ -22,6 +23,7 @@ type UsersDataTableProps = {
   updatingUserId: string | null;
   onView: (userId: string) => void;
   onStatusChange: (userId: string, status: string) => void;
+  pagination?: ComponentProps<typeof AdminDataTable>['pagination'];
 };
 
 const roleBadgeColors: Record<string, string> = {
@@ -35,7 +37,7 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-export function UsersDataTable({ users, loadingUserDetail, updatingUserId, onView, onStatusChange }: UsersDataTableProps) {
+export function UsersDataTable({ users, loadingUserDetail, updatingUserId, onView, onStatusChange, pagination }: UsersDataTableProps) {
   const columns: AdminDataTableColumn<AdminUserListItem>[] = [
     {
       id: 'user', label: 'User', widthClassName: 'w-[26%]',
@@ -55,5 +57,5 @@ export function UsersDataTable({ users, loadingUserDetail, updatingUserId, onVie
     },
   ];
 
-  return <AdminDataTable columns={columns} data={users} emptyMessage="No users found" getRowKey={(user) => user.id} minWidthClassName="min-w-[1120px]" />;
+  return <AdminDataTable columns={columns} data={users} emptyMessage="No users found" getRowKey={(user) => user.id} minWidthClassName="min-w-[1120px]" pagination={pagination} />;
 }
