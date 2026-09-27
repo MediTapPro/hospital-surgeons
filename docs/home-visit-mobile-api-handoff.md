@@ -1,5 +1,7 @@
 # Home Visit Booking — API Handoff for Mobile Frontend
 
+> **Superseded:** Use `docs/patient-doctor-portal-api-handoff.md` as the current contract. This file is retained only as historical reference.
+
 > Handoff doc for the mobile frontend team. Covers **patient-side home visit APIs (all new)** and **doctor-side assignment APIs (added/updated)** for the Home Visit Booking feature.
 
 Base URL: `https://<your-backend-domain>` (dev: `http://localhost:3000`)
@@ -245,4 +247,4 @@ Existing FK columns `patient_address_id` / `patient_family_member_id` are **refe
 3. **Recipient vs account holder** — for family-member visits, `recipientPhone`/`recipientName` are the person being visited. For self visits, `recipientName` is null and `patientPhone` is the account holder's number.
 4. **Delete guards removed** — patients can delete addresses/family members anytime; bookings keep their snapshot.
 5. **Doctor default list** — to mirror web UX, mobile should call doctor assignments with `source=hospital` by default and let the user switch to `source=patient` (Home Visits) or `all`.
-6. **Home visit payment** — not yet implemented (README: "To be built"). `fee`/`consultationFee` are 0/null for home visits.
+6. **Home visit payment** — implemented. After a paid visit is completed, create an order with `/api/bookings/home-visit/{assignmentId}/payment-order`, verify it with `/api/payments/verify`, then reload bookings and payment history.

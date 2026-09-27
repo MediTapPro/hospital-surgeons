@@ -51,32 +51,25 @@ import { SubscriptionsService } from '@/lib/services/subscriptions.service';
  *                 message:
  *                   type: string
  *                   example: "Payment verified and processed successfully"
- *                 data:
+ *                 payment:
+ *                   type: object
+ *                   description: Gateway payment details and mapped internal status
+ *                 order:
  *                   type: object
  *                   properties:
- *                     orderId:
- *                       type: string
- *                       format: uuid
- *                       description: Database order ID
- *                       example: "123e4567-e89b-12d3-a456-426614174002"
- *                     paymentTransactionId:
- *                       type: string
- *                       format: uuid
- *                       description: Payment transaction record ID
- *                       example: "123e4567-e89b-12d3-a456-426614174003"
- *                     subscriptionId:
- *                       type: string
- *                       format: uuid
- *                       nullable: true
- *                       description: Subscription ID if created
- *                       example: "123e4567-e89b-12d3-a456-426614174004"
- *                     status:
- *                       type: string
- *                       enum: [success, pending, failed, refunded]
- *                       example: "success"
- *                     razorpayPaymentId:
- *                       type: string
- *                       example: "pay_XYZ789abc"
+ *                     id: { type: string, format: uuid }
+ *                     status: { type: string, example: paid }
+ *                 transaction:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string, format: uuid }
+ *                     status: { type: string, enum: [success, pending, failed, refunded] }
+ *                 subscription:
+ *                   type: object
+ *                   nullable: true
+ *                 homeVisit:
+ *                   type: object
+ *                   nullable: true
  *       400:
  *         description: "Bad request - missing payment details or invalid signature"
  *         content:

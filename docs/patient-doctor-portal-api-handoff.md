@@ -87,7 +87,14 @@
       "authRequired": false,
       "purpose": "Verify Razorpay payment",
       "body": { "razorpay_order_id": "order_xxx", "razorpay_payment_id": "pay_xxx", "razorpay_signature": "signature_xxx" },
-      "successResponse": { "success": true, "data": { "orderId": "uuid", "paymentTransactionId": "uuid", "status": "success", "razorpayPaymentId": "pay_xxx" } },
+      "successResponse": {
+        "success": true,
+        "payment": { "id": "pay_xxx", "order_id": "order_xxx", "status": "captured", "internal_status": "success", "amount": 100000, "currency": "INR", "method": "card" },
+        "order": { "id": "uuid", "status": "paid" },
+        "transaction": { "id": "uuid", "status": "success" },
+        "subscription": null,
+        "homeVisit": { "assignmentId": "uuid" }
+      },
       "mobileRule": "Close Razorpay checkout on success, then reload bookings and payment history."
     },
     { "method": "GET", "path": "/api/patients/payments?page=1&limit=10", "authRequired": true, "purpose": "List completed home-visit payments only", "maximumLimit": 50 }
@@ -98,7 +105,7 @@
       "path": "/api/doctors/{doctorId}/assignments",
       "authRequired": true,
       "purpose": "List hospital assignments and patient home visits",
-      "query": { "status": "pending | accepted | completed | cancelled | all", "source": "patient | hospital | all", "search": "optional", "selectedDate": "YYYY-MM-DD", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" },
+      "query": { "status": "pending | accepted | declined | completed | cancelled | all", "source": "patient | hospital | all", "search": "optional", "selectedDate": "YYYY-MM-DD", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" },
       "homeVisitFields": ["source=patient", "visitAddress", "visitAddressLabel", "recipientName", "recipientPhone", "recipientRelationship", "symptoms", "fee", "platformCommission", "doctorPayout"],
       "mobileRule": "Use source=patient for Home Visits and source=hospital for Hospital Assignments."
     },
