@@ -4,7 +4,8 @@ import {
   users, 
   assignments,
   hospitals,
-  doctors
+  doctors,
+  patientProfiles
 } from '@/src/db/drizzle/migrations/schema';
 import { eq, desc, and, gte, lte } from 'drizzle-orm';
 
@@ -25,6 +26,7 @@ export interface ReviewQuery {
   assignmentId?: string;
   hospitalId?: string;
   doctorId?: string;
+  patientProfileId?: string;
   minRating?: number;
   maxRating?: number;
 }
@@ -58,6 +60,7 @@ export class ReviewsRepository {
     if (query.assignmentId) whereConditions.push(eq(assignmentRatings.assignmentId, query.assignmentId));
     if (query.hospitalId) whereConditions.push(eq(assignmentRatings.hospitalId, query.hospitalId));
     if (query.doctorId) whereConditions.push(eq(assignmentRatings.doctorId, query.doctorId));
+    if (query.patientProfileId) whereConditions.push(eq(assignmentRatings.patientProfileId, query.patientProfileId));
     if (query.minRating !== undefined) whereConditions.push(gte(assignmentRatings.rating, query.minRating));
     if (query.maxRating !== undefined) whereConditions.push(lte(assignmentRatings.rating, query.maxRating));
 
@@ -66,11 +69,13 @@ export class ReviewsRepository {
         review: assignmentRatings,
         hospital: { id: hospitals.id, name: hospitals.name },
         doctor: { id: doctors.id, firstName: doctors.firstName, lastName: doctors.lastName },
+        patient: { id: patientProfiles.id, fullName: patientProfiles.fullName },
         assignment: { id: assignments.id },
       })
       .from(assignmentRatings)
       .leftJoin(hospitals, eq(hospitals.id, assignmentRatings.hospitalId))
       .leftJoin(doctors, eq(doctors.id, assignmentRatings.doctorId))
+      .leftJoin(patientProfiles, eq(patientProfiles.id, assignmentRatings.patientProfileId))
       .leftJoin(assignments, eq(assignments.id, assignmentRatings.assignmentId))
       .where(whereConditions.length > 0 ? and(...whereConditions) : undefined)
       .orderBy(desc(assignmentRatings.createdAt))
@@ -86,11 +91,13 @@ export class ReviewsRepository {
         review: assignmentRatings,
         hospital: { id: hospitals.id, name: hospitals.name },
         doctor: { id: doctors.id, firstName: doctors.firstName, lastName: doctors.lastName },
+        patient: { id: patientProfiles.id, fullName: patientProfiles.fullName },
         assignment: { id: assignments.id },
       })
       .from(assignmentRatings)
       .leftJoin(hospitals, eq(hospitals.id, assignmentRatings.hospitalId))
       .leftJoin(doctors, eq(doctors.id, assignmentRatings.doctorId))
+      .leftJoin(patientProfiles, eq(patientProfiles.id, assignmentRatings.patientProfileId))
       .leftJoin(assignments, eq(assignments.id, assignmentRatings.assignmentId))
       .where(eq(assignmentRatings.id, id))
       .limit(1);
@@ -120,5 +127,3 @@ export class ReviewsRepository {
     await this.db.delete(assignmentRatings).where(eq(assignmentRatings.id, id));
   }
 }
-
-

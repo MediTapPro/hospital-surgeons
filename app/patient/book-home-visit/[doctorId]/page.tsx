@@ -15,7 +15,8 @@ import {
   User, 
   UserPlus,
   AlertTriangle,
-  Info
+  Info,
+  Star
 } from 'lucide-react';
 import apiClient from '@/lib/api/httpClient';
 import { Avatar, AvatarFallback, AvatarImage } from '@/app/components/ui/avatar';
@@ -36,6 +37,12 @@ interface DoctorDetails {
   yearsOfExperience: number;
   photoUrl: string | null;
   specialties: Array<{ id: string; name: string }>;
+  averageRating: number;
+  totalRatings: number;
+}
+
+interface DoctorReview {
+  review: { id: string; rating: number; reviewText: string | null; reviewerType: 'hospital' | 'patient'; createdAt: string };
 }
 
 interface SavedAddress {
@@ -81,6 +88,7 @@ export default function BookHomeVisitPage() {
   // Global Page states
   const [doctor, setDoctor] = useState<DoctorDetails | null>(null);
   const [loadingDoctor, setLoadingDoctor] = useState(true);
+  const [doctorReviews, setDoctorReviews] = useState<DoctorReview[]>([]);
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   
@@ -165,7 +173,11 @@ export default function BookHomeVisitPage() {
             yearsOfExperience: doc.yearsOfExperience || 0,
             photoUrl: doc.profilePhotoId ? `/api/files/${doc.profilePhotoId}` : null,
             specialties: docData.specialties || doc.specialties || [],
+            averageRating: Number(doc.averageRating || 0),
+            totalRatings: Number(doc.totalRatings || 0),
           });
+          const ratingsResponse = await apiClient.get(`/api/doctors/${doctorId}/ratings?page=1&limit=5`);
+          if (ratingsResponse.data?.success) setDoctorReviews(ratingsResponse.data.data || []);
         }
       } catch (err) {
         console.error('Error fetching doctor details:', err);
@@ -515,6 +527,20 @@ export default function BookHomeVisitPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
+        {doctor && (
+          <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-12 w-12"><AvatarImage src={doctor.photoUrl || undefined} /><AvatarFallback className="bg-blue-600 font-bold text-white">{doctor.firstName[0]}</AvatarFallback></Avatar>
+                <div><h2 className="font-bold text-slate-900">Dr. {doctor.firstName} {doctor.lastName}</h2><p className="text-xs text-slate-500">{doctor.totalRatings ? `${doctor.averageRating.toFixed(1)} from ${doctor.totalRatings} reviews` : 'No reviews yet'}</p></div>
+              </div>
+              <div className="flex items-center gap-1" aria-label={`${doctor.averageRating.toFixed(1)} out of 5 stars`}>
+                {[1, 2, 3, 4, 5].map((star) => <Star key={star} className={`h-4 w-4 ${star <= Math.round(doctor.averageRating) ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />)}
+              </div>
+            </div>
+            {doctorReviews.length > 0 && <div className="mt-5 space-y-3 border-t border-slate-100 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Recent reviews</p>{doctorReviews.map((row) => <div key={row.review.id} className="rounded-xl bg-slate-50 p-3"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1">{[1, 2, 3, 4, 5].map((star) => <Star key={star} className={`h-3.5 w-3.5 ${star <= row.review.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />)}</div><span className="text-[11px] text-slate-400">{new Date(row.review.createdAt).toLocaleDateString('en-IN')}</span></div>{row.review.reviewText && <p className="mt-2 text-sm text-slate-700">{row.review.reviewText}</p>}</div>)}</div>}
+          </section>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Form Side */}

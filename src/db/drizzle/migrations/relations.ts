@@ -558,6 +558,10 @@ export const assignmentRatingsRelations = relations(assignmentRatings, ({one}) =
 		fields: [assignmentRatings.hospitalId],
 		references: [hospitals.id]
 	}),
+	patientProfile: one(patientProfiles, {
+		fields: [assignmentRatings.patientProfileId],
+		references: [patientProfiles.id]
+	}),
 }));
 
 export const hospitalCancellationFlagsRelations = relations(hospitalCancellationFlags, ({one}) => ({

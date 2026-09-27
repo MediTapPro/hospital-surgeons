@@ -75,6 +75,17 @@
     { "method": "PATCH", "path": "/api/assignments/{assignmentId}/status", "authRequired": true, "purpose": "Patient cancellation only", "body": { "status": "cancelled", "cancellationReason": "optional" } },
     {
       "method": "POST",
+      "path": "/api/patients/bookings/{assignmentId}/rating",
+      "authRequired": true,
+      "purpose": "Rate a completed home visit as the assigned patient",
+      "body": { "rating": "integer 1-5", "reviewText": "optional", "positiveTags": "optional string[]", "negativeTags": "optional string[]" },
+      "rules": ["Only the assigned patient can rate", "Only completed patient home visits can be rated", "One rating per assignment"],
+      "response": { "success": true, "rating": {}, "doctorSummary": { "averageRating": 4.5, "totalRatings": 2 } }
+    },
+    { "method": "GET", "path": "/api/patients/reviews?page=1&limit=20", "authRequired": true, "purpose": "List the authenticated patient's own home-visit reviews, newest first" },
+    { "method": "PATCH", "path": "/api/patients/bookings/{assignmentId}/rating", "authRequired": true, "purpose": "Edit the authenticated patient's own review for a completed home visit" },
+    {
+      "method": "POST",
       "path": "/api/bookings/home-visit/{assignmentId}/payment-order",
       "authRequired": true,
       "purpose": "Create Razorpay order after a paid visit is completed",
@@ -133,6 +144,13 @@
       "query": { "source": "hospital_assignment | home_visit", "status": "pending | processing | completed | failed", "limit": "maximum 50" },
       "responseFields": ["totalEarnings", "pendingEarnings", "payments[].paymentSource", "payments[].patientPaymentStatus", "payments[].patientPaidAt", "payments[].consultationFee", "payments[].platformCommission", "payments[].doctorPayout", "payments[].paymentStatus", "payments[].paidToDoctorAt", "payments[].assignment", "payments[].hospital", "payments[].patient"],
       "rules": ["patientPaymentStatus applies only to home_visit", "paymentStatus is doctor settlement state", "Doctor cannot mark payout paid; admin does that"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/doctors/{doctorId}/ratings?page=1&limit=20",
+      "authRequired": true,
+      "purpose": "List doctor reviews. Doctors can view their own full reviews, admins can view any doctor, and patients receive review content without reviewer identity.",
+      "query": { "page": "optional", "limit": "maximum 50" }
     }
   ],
   "sharedChatApis": [

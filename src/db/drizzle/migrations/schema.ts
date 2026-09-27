@@ -923,7 +923,10 @@ export const orders = pgTable("orders", {
 export const assignmentRatings = pgTable("assignment_ratings", {
 	id: uuid().default(sql`uuid_generate_v4()`).primaryKey().notNull(),
 	assignmentId: uuid("assignment_id").notNull(),
-	hospitalId: uuid("hospital_id").notNull(),
+	hospitalId: uuid("hospital_id"),
+	patientProfileId: uuid("patient_profile_id"),
+	// Keep aligned with lib/enums/ratings.enums.ts (RATING_REVIEWER_TYPES).
+	reviewerType: text("reviewer_type").default('hospital').notNull(),
 	doctorId: uuid("doctor_id").notNull(),
 	rating: integer().notNull(),
 	reviewText: text("review_text"),
@@ -946,8 +949,15 @@ export const assignmentRatings = pgTable("assignment_ratings", {
 			foreignColumns: [hospitals.id],
 			name: "assignment_ratings_hospital_id_fkey"
 		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.patientProfileId],
+			foreignColumns: [patientProfiles.id],
+			name: "assignment_ratings_patient_profile_id_fkey"
+		}).onDelete("cascade"),
 	unique("assignment_ratings_assignment_id_key").on(table.assignmentId),
 	check("assignment_ratings_rating_check", sql`(rating >= 1) AND (rating <= 5)`),
+	check("assignment_ratings_reviewer_type_check", sql`reviewer_type = ANY (ARRAY['hospital'::text, 'patient'::text])`),
+	check("assignment_ratings_reviewer_consistency_check", sql`((reviewer_type = 'hospital'::text AND hospital_id IS NOT NULL AND patient_profile_id IS NULL) OR (reviewer_type = 'patient'::text AND hospital_id IS NULL AND patient_profile_id IS NOT NULL))`),
 ]);
 
 export const hospitalCancellationFlags = pgTable("hospital_cancellation_flags", {

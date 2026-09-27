@@ -15,8 +15,6 @@ import {
   Umbrella,
   DollarSign,
   Star,
-  Settings,
-  HelpCircle,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -206,14 +204,14 @@ export function DoctorSidebar({ collapsed: externalCollapsed, onToggleCollapse }
         { id: 'transactions', label: 'Payment Transactions', icon: Receipt, href: '/doctor/transactions' },
       ]
     },
-    // {
-    //   title: 'Performance & Support',
-    //   items: [
-    //     { id: 'ratings', label: 'Ratings & Reviews', icon: Star, href: '/doctor/ratings' },
+    {
+      title: 'Performance & Support',
+      items: [
+        { id: 'ratings', label: 'Ratings & Reviews', icon: Star, href: '/doctor/ratings' },
     //     { id: 'settings', label: 'Preferences', icon: Settings, href: '/doctor/settings' },
     //     { id: 'support', label: 'Support', icon: HelpCircle, href: '/doctor/support' },
-    //   ]
-    // }
+      ]
+    }
   ];
 
   const isActive = (href: string) => {
