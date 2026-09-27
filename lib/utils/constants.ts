@@ -55,3 +55,15 @@ export const HOME_VISIT_PAYMENT_TIMINGS = [
 
 export type HomeVisitPaymentTiming =
   (typeof HOME_VISIT_PAYMENT_TIMINGS)[number]['value'];
+
+export const PLATFORM_CURRENCY = 'INR' as const;
+export const PLATFORM_LOCALE = 'en-IN' as const;
+
+export function formatPlatformCurrency(value: number | null | undefined, currency: string = PLATFORM_CURRENCY) {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'N/A';
+  return new Intl.NumberFormat(PLATFORM_LOCALE, {
+    style: 'currency',
+    currency: currency || PLATFORM_CURRENCY,
+    maximumFractionDigits: 2,
+  }).format(value);
+}

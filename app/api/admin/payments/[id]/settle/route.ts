@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
 import { AssignmentPaymentsService } from '@/lib/services/assignment-payments.service';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
 /**
  * @swagger
@@ -24,7 +25,11 @@ import { AssignmentPaymentsService } from '@/lib/services/assignment-payments.se
  */
 async function patchHandler(_req: AuthenticatedRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const result = await new AssignmentPaymentsService().markSettlementPaid(id);
+  const result = await new AssignmentPaymentsService().markSettlementPaid({
+    paymentId: id,
+    actorId: _req.user!.userId,
+    requestMetadata: getRequestMetadata(_req),
+  });
 
   if (!result.success) {
     const messages: Record<string, string> = {

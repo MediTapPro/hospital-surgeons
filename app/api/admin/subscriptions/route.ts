@@ -24,6 +24,7 @@ async function getHandler(req: AuthenticatedRequest) {
       page,
       limit,
       status: params.get('status') || undefined,
+      userRole: params.get('role') === 'doctor' || params.get('role') === 'hospital' ? params.get('role') as 'doctor' | 'hospital' : undefined,
       planId: params.get('planId') || undefined,
       userId: params.get('userId') || undefined,
       expiringSoon: params.get('expiringSoon') === 'true',
@@ -32,6 +33,7 @@ async function getHandler(req: AuthenticatedRequest) {
     return NextResponse.json({
       success: true,
       data: result.data,
+      summary: result.summary,
       pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) },
     });
   } catch (error) {

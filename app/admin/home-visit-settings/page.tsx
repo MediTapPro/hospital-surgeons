@@ -47,10 +47,10 @@ function SettingsToggle({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-slate-200 p-4">
-      <div className="space-y-1">
-        <Label htmlFor={id} className="text-sm font-semibold text-slate-900">{label}</Label>
-        <p className="text-sm leading-5 text-slate-500">{description}</p>
+    <div className="flex items-center justify-between gap-6 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-slate-300">
+      <div className="min-w-0 space-y-1">
+        <Label htmlFor={id} className="block text-sm font-semibold text-slate-900">{label}</Label>
+        <p className="max-w-2xl text-sm leading-5 text-slate-500">{description}</p>
       </div>
       <button
         type="button"
@@ -59,19 +59,19 @@ function SettingsToggle({
         aria-checked={checked}
         aria-label={label}
         onClick={() => onCheckedChange(!checked)}
-        className={`relative h-10 w-24 shrink-0 rounded-full border text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 ${
+        className={`relative h-7 w-12 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 ${
           checked
             ? 'border-teal-600 bg-teal-600 text-white'
             : 'border-slate-300 bg-slate-100 text-slate-600'
         }`}
         >
         <span
-          className={`absolute top-1.5 left-1.5 size-6 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-14' : 'translate-x-0'
+          className={`absolute left-1 top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? 'translate-x-5' : 'translate-x-0'
           }`}
         />
-        <span className={checked ? 'absolute left-3 top-3' : 'absolute right-3 top-3'}>{checked ? 'On' : 'Off'}</span>
       </button>
+      <span className={`hidden w-12 text-right text-xs font-semibold sm:block ${checked ? 'text-teal-700' : 'text-slate-500'}`}>{checked ? 'On' : 'Off'}</span>
     </div>
   );
 }
@@ -170,7 +170,17 @@ export default function HomeVisitSettingsPage() {
         }
       />
 
-      <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
+        <div className="rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-start gap-4">
+            <div className="rounded-xl bg-teal-600 p-3 text-white shadow-sm"><CalendarHeart className="size-6" /></div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">Platform controls</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">Home-visit booking rules</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">These settings control new bookings. Existing assignments keep the rules captured when they were created.</p>
+            </div>
+          </div>
+        </div>
         <Card className="border-slate-200 shadow-sm">
           <CardHeader className="flex-row gap-3 space-y-0">
             <div className="rounded-lg bg-teal-50 p-2.5 text-teal-700"><CalendarHeart className="size-5" /></div>
@@ -207,8 +217,8 @@ export default function HomeVisitSettingsPage() {
               onCheckedChange={(freeTrialEnabled) => updateSettings({ freeTrialEnabled })}
             />
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="trial-visit-limit">Free visits per patient</Label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <Label htmlFor="trial-visit-limit" className="text-sm font-semibold text-slate-900">Free visits per patient</Label>
                 <Input
                   id="trial-visit-limit"
                   type="number"
@@ -216,12 +226,13 @@ export default function HomeVisitSettingsPage() {
                   step="1"
                   disabled={!settings.freeTrialEnabled}
                   value={settings.freeTrialVisitLimit}
+                  className="mt-2 h-11 border-slate-200 bg-white focus-visible:ring-teal-500"
                   onChange={(event) => updateSettings({ freeTrialVisitLimit: Number(event.target.value) })}
                 />
-                <p className="text-xs text-slate-500">Set to zero to keep the trial feature enabled without granting any visits.</p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">Use <span className="font-semibold text-slate-700">0</span> to keep the trial visible but grant no complimentary visits.</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="active-trial-limit">Active free-trial bookings</Label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <Label htmlFor="active-trial-limit" className="text-sm font-semibold text-slate-900">Active free-trial bookings</Label>
                 <Input
                   id="active-trial-limit"
                   type="number"
@@ -229,9 +240,10 @@ export default function HomeVisitSettingsPage() {
                   step="1"
                   disabled={!settings.freeTrialEnabled}
                   value={settings.freeTrialActiveBookingLimit}
+                  className="mt-2 h-11 border-slate-200 bg-white focus-visible:ring-teal-500"
                   onChange={(event) => updateSettings({ freeTrialActiveBookingLimit: Number(event.target.value) })}
                 />
-                <p className="text-xs text-slate-500">Limits pending or accepted complimentary bookings per patient.</p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">Maximum pending or accepted complimentary bookings per patient.</p>
               </div>
             </div>
           </CardContent>
@@ -251,7 +263,7 @@ export default function HomeVisitSettingsPage() {
               value={settings.paidPaymentTiming}
               onValueChange={(paidPaymentTiming: HomeVisitPaymentTiming) => updateSettings({ paidPaymentTiming })}
             >
-              <SelectTrigger id="paid-payment-timing" className="bg-white"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="paid-payment-timing" className="h-11 bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {HOME_VISIT_PAYMENT_TIMINGS.map((timing) => (
                   <SelectItem key={timing.value} value={timing.value}>{timing.label}</SelectItem>
@@ -281,9 +293,9 @@ export default function HomeVisitSettingsPage() {
           </CardContent>
         </Card>
 
-        <div className="flex items-start gap-3 rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-teal-700" />
-          <p>Home-visit availability and payment policy changes apply to new bookings only. The assignment-completion setting applies immediately to hospital assignments and home visits.</p>
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-amber-700" />
+          <p><span className="font-semibold">Change impact:</span> availability, trial, and payment-policy changes apply to new bookings only. Early assignment completion applies immediately to hospital assignments and home visits.</p>
         </div>
       </div>
     </main>

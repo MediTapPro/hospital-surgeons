@@ -1,4 +1,6 @@
 import { PlatformFeesRepository } from '@/lib/repositories/platform-fees.repository';
+import { getDb } from '@/lib/db';
+import { buildChangesObject, createAuditLog, type AuditLogData } from '@/lib/utils/audit-logger';
 
 export class PlatformFeesService {
   private repo = new PlatformFeesRepository();
@@ -81,7 +83,7 @@ export class PlatformFeesService {
     specialtyId: string | null;
     fee: number;
     platformCommissionPercentage: number;
-  }) {
+  }, actor: { userId: string; requestMetadata?: Pick<AuditLogData, 'ipAddress' | 'userAgent' | 'endpoint'> }) {
     try {
       // Validate data
       if (data.fee < 0) {
@@ -97,36 +99,28 @@ export class PlatformFeesService {
         };
       }
 
-      // Check if a configuration for this specialty (or default) already exists
-      const existing = await this.repo.findBySpecialtyId(data.specialtyId);
-
       const feeString = data.fee.toFixed(2);
       const commissionString = data.platformCommissionPercentage.toFixed(2);
-
-      if (existing) {
-        // Update existing record
-        const updated = await this.repo.update(existing.id, {
-          fee: feeString,
-          platformCommissionPercentage: commissionString,
-        });
-        return {
-          success: true,
-          message: 'Platform fee configuration updated successfully',
-          data: updated,
-        };
-      } else {
-        // Create new record
-        const created = await this.repo.create({
-          specialtyId: data.specialtyId,
-          fee: feeString,
-          platformCommissionPercentage: commissionString,
-        });
-        return {
-          success: true,
-          message: 'Platform fee configuration created successfully',
-          data: created,
-        };
-      }
+      const db = getDb();
+      return await db.transaction(async (tx) => {
+        const repository = new PlatformFeesRepository(tx);
+        const existing = await repository.findBySpecialtyId(data.specialtyId, tx);
+        const saved = existing
+          ? await repository.update(existing.id, { fee: feeString, platformCommissionPercentage: commissionString }, tx)
+          : await repository.create({ specialtyId: data.specialtyId, fee: feeString, platformCommissionPercentage: commissionString }, tx);
+        if (!saved) throw new Error('Failed to save platform fee configuration');
+        await createAuditLog({
+          userId: actor.userId,
+          actorType: 'admin',
+          action: existing ? 'update' : 'create',
+          entityType: 'platform_home_visit_fee',
+          entityId: saved.id,
+          details: { specialtyId: data.specialtyId },
+          changes: existing ? buildChangesObject(existing, saved, ['fee', 'platformCommissionPercentage']) : undefined,
+          ...actor.requestMetadata,
+        }, tx, { throwOnError: true });
+        return { success: true, message: existing ? 'Platform fee configuration updated successfully' : 'Platform fee configuration created successfully', data: saved };
+      });
     } catch (error) {
       return {
         success: false,
@@ -136,7 +130,7 @@ export class PlatformFeesService {
     }
   }
 
-  async deletePlatformFee(id: string) {
+  async deletePlatformFee(id: string, actor: { userId: string; requestMetadata?: Pick<AuditLogData, 'ipAddress' | 'userAgent' | 'endpoint'> }) {
     try {
       const feeConfig = await this.repo.findById(id);
       if (!feeConfig) {
@@ -155,11 +149,21 @@ export class PlatformFeesService {
         };
       }
 
-      await this.repo.delete(id);
-      return {
-        success: true,
-        message: 'Platform fee configuration deleted successfully',
-      };
+      const db = getDb();
+      return await db.transaction(async (tx) => {
+        const repository = new PlatformFeesRepository(tx);
+        const deleted = await repository.delete(id, tx);
+        await createAuditLog({
+          userId: actor.userId,
+          actorType: 'admin',
+          action: 'delete',
+          entityType: 'platform_home_visit_fee',
+          entityId: id,
+          details: { specialtyId: feeConfig.specialtyId, fee: feeConfig.fee, platformCommissionPercentage: feeConfig.platformCommissionPercentage },
+          ...actor.requestMetadata,
+        }, tx, { throwOnError: true });
+        return { success: true, message: 'Platform fee configuration deleted successfully', data: deleted };
+      });
     } catch (error) {
       return {
         success: false,

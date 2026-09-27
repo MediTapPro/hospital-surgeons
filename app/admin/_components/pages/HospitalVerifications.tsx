@@ -74,19 +74,20 @@ export function HospitalVerifications() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [updating, setUpdating] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHospitals();
-  }, [page, searchQuery, activeTab]);
+  }, [page, pageSize, searchQuery, activeTab]);
 
   const fetchHospitals = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '10',
+        limit: pageSize.toString(),
         status: activeTab === 'pending' ? 'pending' : activeTab === 'approved' ? 'verified' : 'rejected',
       });
 
@@ -99,7 +100,7 @@ export function HospitalVerifications() {
 
       if (data.success) {
         setHospitals(data.data);
-        setTotalPages(data.pagination.totalPages);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error('Failed to fetch hospitals');
       }
@@ -276,33 +277,8 @@ export function HospitalVerifications() {
                     emptyMessage="No hospitals found"
                     getRowKey={(hospital) => hospital.id}
                     minWidthClassName="min-w-[1300px]"
+                    pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }}
                   />
-
-                  {totalPages > 1 && (
-                    <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-sm text-slate-600">
-                        Page {page} of {totalPages}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPage(p => Math.max(1, p - 1))}
-                          disabled={page === 1}
-                        >
-                          Previous
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                          disabled={page === totalPages}
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
             </div>

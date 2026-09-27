@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { isAuthenticated, getUserRole, getDashboardPath } from '@/lib/auth/utils';
+import { isAdminOnlyPortal } from '@/lib/config/portal-mode';
 
 /**
  * Admin login page - redirects to common login with admin role selected
@@ -19,8 +20,13 @@ export default function AdminLoginPage() {
         // Already logged in as admin, go to dashboard
         router.push('/admin');
       } else {
-        // Logged in as different role, go to their dashboard
-        router.push(getDashboardPath(role));
+        if (isAdminOnlyPortal()) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          router.push('/login?role=admin');
+        } else {
+          router.push(getDashboardPath(role));
+        }
       }
     } else {
       // Not logged in, redirect to common login with admin role selected
@@ -38,4 +44,3 @@ export default function AdminLoginPage() {
     </div>
   );
 }
-

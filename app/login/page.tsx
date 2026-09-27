@@ -6,6 +6,7 @@ import Link from 'next/link';
 // import Header from '../components/Header';
 import { isAuthenticated, getUserRole, getDashboardPath, decodeToken } from '@/lib/auth/utils';
 import apiClient from '@/lib/api/httpClient';
+import { isAdminOnlyPortal } from '@/lib/config/portal-mode';
 
 type AccountType = 'doctor' | 'hospital' | 'patient' | 'admin';
 
@@ -14,7 +15,8 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const roleParam = searchParams.get('role') as AccountType | null;
   
-  const [accountType, setAccountType] = useState<AccountType>(roleParam || 'doctor');
+  const adminOnlyPortal = isAdminOnlyPortal();
+  const [accountType, setAccountType] = useState<AccountType>(adminOnlyPortal ? 'admin' : roleParam || 'doctor');
   const registeredParam = searchParams.get('registered');
   const emailParam = searchParams.get('email');
   const [email, setEmail] = useState(emailParam || '');
@@ -200,13 +202,13 @@ function LoginForm() {
   const previewContent = getPreviewContent();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className={`min-h-screen ${adminOnlyPortal ? 'bg-[radial-gradient(circle_at_top,_#164e63,_#0f172a_55%,_#020617)]' : 'bg-gradient-to-br from-gray-50 to-gray-100'}`}>
       {/* <Header /> */}
 
-      <div className="flex items-center justify-center min-h-[calc(100vh-80px)] p-6">
-        <div className="grid md:grid-cols-2 gap-8 max-w-6xl w-full">
+      <div className="flex min-h-screen items-center justify-center px-4 py-8 sm:px-6">
+        <div className={adminOnlyPortal ? 'w-full max-w-md' : 'grid w-full max-w-6xl gap-8 md:grid-cols-2'}>
           {/* Left Panel - Login Form */}
-          <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className={`rounded-2xl border p-6 shadow-2xl sm:p-8 ${adminOnlyPortal ? 'border-white/15 bg-white/95 backdrop-blur' : 'border-slate-200 bg-white'}`}>
             {/* Success Message */}
             {showSuccessMessage && (
               <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -223,22 +225,22 @@ function LoginForm() {
 
             {/* Logo */}
             <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ${adminOnlyPortal ? 'bg-teal-600 shadow-teal-900/30' : 'bg-blue-600'}`}>
                 <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Hospital Surgeons</h1>
-              <p className="text-gray-600">Login to access your dashboard</p>
+              <h1 className="mb-2 text-3xl font-bold tracking-tight text-gray-900">{adminOnlyPortal ? 'Healthcare Admin' : 'Hospital Surgeons'}</h1>
+              <p className="text-gray-600">{adminOnlyPortal ? 'Secure administrator access' : 'Login to access your dashboard'}</p>
             </div>
 
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-              <p className="text-gray-600">Select your account type and login.</p>
+              <h2 className="mb-2 text-2xl font-bold text-gray-900">Welcome back</h2>
+              <p className="text-gray-600">{adminOnlyPortal ? 'Sign in with an administrator account.' : 'Select your account type and login.'}</p>
             </div>
 
             {/* Account Type Selector */}
-            <div className="mb-6">
+            {!adminOnlyPortal && <div className="mb-6">
               <div className="flex bg-gray-100 rounded-lg p-1 flex-wrap md:flex-nowrap gap-1">
                 <button
                   type="button"
@@ -300,7 +302,7 @@ function LoginForm() {
                   <span>Admin</span>
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* Login Form */}
             <form onSubmit={handleLogin} className="space-y-6">
@@ -397,7 +399,7 @@ function LoginForm() {
               </button>
 
               {/* Register Links */}
-              <div className="mt-6 pt-6 border-t border-gray-200">
+              {!adminOnlyPortal && <div className="mt-6 pt-6 border-t border-gray-200">
                 <p className="text-center text-sm text-gray-600 mb-4">
                   Don't have an account? Register as:
                 </p>
@@ -421,7 +423,7 @@ function LoginForm() {
                     Hospital
                   </Link>
                 </div>
-              </div>
+              </div>}
             </form>
           </div>
 
@@ -477,4 +479,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-

@@ -1,129 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { doctorAvailability, doctors, hospitals, assignments } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, isNull, desc, sql } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
+import { withAuthAndContext, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { AdminScheduleUpdatesService } from '@/lib/services/admin-schedule-updates.service';
 
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ parentSlotId: string }> }
-) {
-  try {
-    const db = getDb();
-    const params = await context.params;
-    const parentSlotId = params.parentSlotId;
-
-    // Get parent slot
-    const parentSlot = await db
-      .select({
-        id: doctorAvailability.id,
-        doctorId: doctorAvailability.doctorId,
-        slotDate: doctorAvailability.slotDate,
-        startTime: doctorAvailability.startTime,
-        endTime: doctorAvailability.endTime,
-        status: doctorAvailability.status,
-        isManual: doctorAvailability.isManual,
-        templateId: doctorAvailability.templateId,
-        updatedAt: doctorAvailability.updatedAt,
-        doctorFirstName: sql<string>`(SELECT first_name FROM doctors WHERE id = ${doctorAvailability.doctorId})`,
-        doctorLastName: sql<string>`(SELECT last_name FROM doctors WHERE id = ${doctorAvailability.doctorId})`,
-      })
-      .from(doctorAvailability)
-      .where(
-        and(
-          eq(doctorAvailability.id, parentSlotId),
-          isNull(doctorAvailability.parentSlotId)
-        )
-      )
-      .limit(1);
-
-    if (parentSlot.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: 'Parent slot not found',
-        },
-        { status: 404 }
-      );
-    }
-
-    const parent = parentSlot[0];
-
-    // Get all sub-slots for this parent slot
-    const subSlots = await db
-      .select({
-        id: doctorAvailability.id,
-        slotDate: doctorAvailability.slotDate,
-        startTime: doctorAvailability.startTime,
-        endTime: doctorAvailability.endTime,
-        status: doctorAvailability.status,
-        bookedByHospitalId: doctorAvailability.bookedByHospitalId,
-        bookedAt: doctorAvailability.bookedAt,
-        updatedAt: doctorAvailability.updatedAt,
-        // Hospital info
-        hospitalName: sql<string | null>`(
-          SELECT name FROM hospitals 
-          WHERE id = ${doctorAvailability.bookedByHospitalId}
-        )`,
-        // Assignment info
-        assignmentId: sql<string | null>`(
-          SELECT id FROM assignments 
-          WHERE availability_slot_id = ${doctorAvailability.id}
-          LIMIT 1
-        )`,
-        assignmentStatus: sql<string | null>`(
-          SELECT status FROM assignments 
-          WHERE availability_slot_id = ${doctorAvailability.id}
-          LIMIT 1
-        )`,
-      })
-      .from(doctorAvailability)
-      .where(eq(doctorAvailability.parentSlotId, parentSlotId))
-      .orderBy(desc(doctorAvailability.startTime));
-
-    // Format response
-    const formattedSubSlots = subSlots.map((slot) => ({
-      id: slot.id,
-      slotDate: slot.slotDate,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      status: slot.status,
-      hospitalId: slot.bookedByHospitalId || null,
-      hospitalName: slot.hospitalName || null,
-      assignmentId: slot.assignmentId || null,
-      assignmentStatus: slot.assignmentStatus || null,
-      bookedAt: slot.bookedAt || null,
-      updatedAt: slot.updatedAt,
-    }));
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        parentSlot: {
-          id: parent.id,
-          doctorId: parent.doctorId,
-          doctorName: `Dr. ${parent.doctorFirstName || ''} ${parent.doctorLastName || ''}`.trim() || 'Unknown',
-          slotDate: parent.slotDate,
-          startTime: parent.startTime,
-          endTime: parent.endTime,
-          status: parent.status,
-          isManual: parent.isManual,
-          templateId: parent.templateId || null,
-          updatedAt: parent.updatedAt,
-        },
-        subSlots: formattedSubSlots,
-        totalSubSlots: formattedSubSlots.length,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching parent slot details:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to fetch parent slot details',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
-  }
+/** @swagger
+ * /api/admin/schedule-updates/parent-slot/{parentSlotId}:
+ *   get:
+ *     summary: Get a parent schedule slot and its sub-slots
+ *     tags: [Admin Schedule]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: parentSlotId, required: true, schema: { type: string, format: uuid } }]
+ *     responses: { 200: { description: Parent slot details }, 404: { description: Parent slot not found }, 403: { description: Admin access required } }
+ */
+async function getHandler(_req: AuthenticatedRequest, context: { params: Promise<{ parentSlotId: string }> }) {
+  const { parentSlotId } = await context.params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parentSlotId)) return NextResponse.json({ success: false, message: 'Invalid parent slot id.' }, { status: 400 });
+  try { const data = await new AdminScheduleUpdatesService().parentDetail(parentSlotId); return data ? NextResponse.json({ success: true, data }) : NextResponse.json({ success: false, message: 'Parent slot not found' }, { status: 404 }); }
+  catch (error) { return NextResponse.json({ success: false, message: 'Failed to fetch parent slot details' }, { status: 500 }); }
 }
-
+export const GET = withAuthAndContext(getHandler, ['admin']);

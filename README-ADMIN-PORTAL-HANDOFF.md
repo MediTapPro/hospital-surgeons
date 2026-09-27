@@ -56,7 +56,18 @@ Admin subscription APIs are now layered and protected:
 - Response mapping and update rules live in `lib/services/admin-subscriptions.service.ts`.
 - Subscription update plus audit logging is atomic; an audit-write failure rolls back the update.
 - `SubscriptionsOverview` uses `apiClient` so access-token refresh behavior is preserved.
+- The subscriptions page filters by Doctor or Hospital through the API, including Expiring Soon.
+- Subscription amounts are displayed in the platform currency (INR); legacy currency labels are not shown in the admin price column.
 - Consumer doctor/hospital subscription APIs were not changed.
+
+### Assignments monitor
+
+The Admin Assignments page now uses the shared `AdminDataTable` with a sticky Actions column and distinguishes:
+
+- `hospital_assignment` records, which use hospital patients;
+- `home_visit` records, which use `patient_profile_id` and `home_visit_details`.
+
+Home visits display the patient/profile or recipient name and visit address instead of showing `Unknown` for hospital data. Assignment list, detail, statistics, and update APIs are admin-only and use the assignment repository/service. Updates and audit records are transactional.
 
 ## Runtime verification still required
 
@@ -84,3 +95,27 @@ No schema migration is required for the subscription refactor.
 - Support is currently hidden from the admin navigation because no supported backend workflow is assigned to that page.
 - Refunds, automated doctor payouts, and subscription payment reconciliation remain outside this MVP refactor.
 - Runtime database verification has not been performed by the static checks above.
+
+### Shared admin tables
+
+`AdminDataTable` now supports a shared pagination footer. Users, doctor/hospital verifications, specialties, subscriptions, and assignments use server pagination with a page-size selector (10, 20, 25, 50, or 100), total-count display, and previous/next controls. Procedures, categories, and specialty hierarchy tables use the same control in client-pagination mode. Changing the page size resets the current page to 1.
+
+### Analytics (temporarily hidden)
+
+Analytics endpoints are admin-guarded and use the `AdminAnalyticsService`/`AdminAnalyticsRepository` layers. The dashboard uses the authenticated API client, validates the 1–24 month range, displays INR revenue, and supports refresh and range selection. The sidebar entry is currently hidden and direct `/admin/analytics` visits redirect to the admin dashboard until the metrics are finalized.
+
+### Web portal mode
+
+The web UI supports two deployment modes through `NEXT_PUBLIC_PORTAL_MODE`:
+
+- `all` (default, dev server): doctor, hospital, patient, and admin login/registration UI is available.
+- `admin` (production admin web server): the common login renders only the admin form, registration routes redirect to `/admin/login`, and doctor/hospital/patient web layouts redirect to the admin login.
+
+This is a UI deployment setting only. Mobile-facing APIs remain available and continue enforcing their own role guards.
+
+Local verification commands:
+
+```text
+npm run dev                 # uses .env; all portals
+npm run prod -- -p 3001    # builds with .env.production; admin-only portal
+```

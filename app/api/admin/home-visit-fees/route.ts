@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { withAuth, AuthenticatedRequest } from '@/lib/auth/middleware';
+import { NextResponse } from 'next/server';
+import { withAuth, type AuthenticatedRequest } from '@/lib/auth/middleware';
 import { PlatformFeesService } from '@/lib/services/platform-fees.service';
+import { getRequestMetadata } from '@/lib/utils/audit-logger';
 
 const feesService = new PlatformFeesService();
 
@@ -44,18 +45,22 @@ async function postHandler(req: AuthenticatedRequest) {
     const feeNum = parseFloat(fee);
     const commissionNum = parseFloat(platformCommissionPercentage);
 
-    if (isNaN(feeNum) || isNaN(commissionNum)) {
+    if (!Number.isFinite(feeNum) || !Number.isFinite(commissionNum) || feeNum < 0 || commissionNum < 0 || commissionNum > 100) {
       return NextResponse.json(
-        { success: false, message: 'Fee and platformCommissionPercentage must be valid numbers' },
+        { success: false, message: 'Fee must be non-negative and platformCommissionPercentage must be between 0 and 100' },
         { status: 400 }
       );
+    }
+
+    if (specialtyId !== null && specialtyId !== undefined && (typeof specialtyId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(specialtyId))) {
+      return NextResponse.json({ success: false, message: 'specialtyId must be a valid UUID or null' }, { status: 400 });
     }
 
     const result = await feesService.upsertPlatformFee({
       specialtyId: specialtyId || null,
       fee: feeNum,
       platformCommissionPercentage: commissionNum,
-    });
+    }, { userId: req.user!.userId, requestMetadata: getRequestMetadata(req) });
 
     if (!result.success) {
       return NextResponse.json(result, { status: 400 });

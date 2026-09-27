@@ -56,7 +56,8 @@ export function UsersManagement() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all');
   const [activeTab, setActiveTab] = useState('all');
   const [page, setPage] = useState(parseInt(searchParams.get('page') || '1'));
-  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [showUserDetail, setShowUserDetail] = useState(false);
   const [loadingUserDetail, setLoadingUserDetail] = useState(false);
@@ -69,7 +70,7 @@ export function UsersManagement() {
 
   useEffect(() => {
     fetchUsers();
-  }, [page, roleFilter, statusFilter, searchQuery, activeTab]);
+  }, [page, pageSize, roleFilter, statusFilter, searchQuery, activeTab]);
 
   // Update URL when filters change
   useEffect(() => {
@@ -92,7 +93,7 @@ export function UsersManagement() {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '10',
+        limit: pageSize.toString(),
       });
 
       if (activeTab !== 'all') {
@@ -114,7 +115,7 @@ export function UsersManagement() {
 
       if (data.success) {
         setUsers(data.data);
-        setTotalPages(data.pagination.totalPages);
+        setTotalCount(data.pagination?.total || 0);
       } else {
         toast.error('Failed to fetch users');
       }
@@ -326,34 +327,8 @@ export function UsersManagement() {
                 updatingUserId={updating}
                 onView={fetchUserDetail}
                 onStatusChange={updateUserStatus}
+                pagination={{ page, pageSize, total: totalCount, onPageChange: setPage, onPageSizeChange: (size) => { setPageSize(size); setPage(1); }, disabled: loading }}
               />
-            )}
-
-            {/* Pagination */}
-            {!loading && totalPages > 1 && (
-              <div className="p-4 border-t border-slate-200 flex items-center justify-between">
-                <div className="text-sm text-slate-600">
-                  Page {page} of {totalPages}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
             )}
           </div>
         </Tabs>

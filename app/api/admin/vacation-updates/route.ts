@@ -1,120 +1,41 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { doctorLeaves, doctors } from '@/src/db/drizzle/migrations/schema';
-import { eq, and, gte, lte, desc, sql, count } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
+import { withAuth, type AuthenticatedRequest } from '@/lib/auth/middleware';
+import { AdminVacationUpdatesService } from '@/lib/services/admin-vacation-updates.service';
 
-export async function GET(req: NextRequest) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LEAVE_TYPES = ['vacation', 'sick', 'personal', 'emergency', 'other'];
+
+/** @swagger
+ * /api/admin/vacation-updates:
+ *   get:
+ *     summary: List doctor vacation updates (Admin only)
+ *     tags: [Admin Vacation Updates]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+ *       - { in: query, name: doctorId, schema: { type: string, format: uuid } }
+ *       - { in: query, name: leaveType, schema: { type: string, enum: [vacation, sick, personal, emergency, other] } }
+ *       - { in: query, name: startDate, schema: { type: string, format: date } }
+ *       - { in: query, name: endDate, schema: { type: string, format: date } }
+ *     responses: { 200: { description: Vacation updates retrieved }, 400: { description: Invalid query }, 403: { description: Admin access required } }
+ */
+async function getHandler(req: AuthenticatedRequest) {
+  const query = req.nextUrl.searchParams;
+  const page = Number(query.get('page') || 1);
+  const limit = Number(query.get('limit') || 20);
+  const doctorId = query.get('doctorId') || undefined;
+  const leaveType = query.get('leaveType') || undefined;
+  const startDate = query.get('startDate') || undefined;
+  const endDate = query.get('endDate') || undefined;
+  const invalidDate = (value?: string) => Boolean(value && Number.isNaN(Date.parse(value)));
+  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100 || (doctorId && !UUID_PATTERN.test(doctorId)) || (leaveType && !LEAVE_TYPES.includes(leaveType)) || invalidDate(startDate) || invalidDate(endDate) || (startDate && endDate && startDate > endDate)) return NextResponse.json({ success: false, message: 'Invalid vacation update filters.' }, { status: 400 });
   try {
-    const db = getDb();
-    const searchParams = req.nextUrl.searchParams;
-    
-    // Pagination
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = (page - 1) * limit;
-
-    // Filters
-    const doctorId = searchParams.get('doctorId') || undefined;
-    const leaveType = searchParams.get('leaveType') || undefined;
-    const startDate = searchParams.get('startDate') || undefined; // Filter by startDate
-    const endDate = searchParams.get('endDate') || undefined; // Filter by endDate
-
-    // Build where conditions
-    const conditions: any[] = [];
-    
-    if (doctorId) {
-      conditions.push(eq(doctorLeaves.doctorId, doctorId));
-    }
-    
-    if (leaveType) {
-      conditions.push(eq(doctorLeaves.leaveType, leaveType));
-    }
-    
-    // Filter by date range - check if leave overlaps with the filter range
-    if (startDate || endDate) {
-      if (startDate && endDate) {
-        // Leave overlaps if: leave.startDate <= filter.endDate AND leave.endDate >= filter.startDate
-        conditions.push(
-          sql`${doctorLeaves.startDate} <= ${endDate} AND ${doctorLeaves.endDate} >= ${startDate}`
-        );
-      } else if (startDate) {
-        // Leave overlaps if: leave.endDate >= filter.startDate
-        conditions.push(gte(doctorLeaves.endDate, startDate));
-      } else if (endDate) {
-        // Leave overlaps if: leave.startDate <= filter.endDate
-        conditions.push(lte(doctorLeaves.startDate, endDate));
-      }
-    }
-
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-    // Get total count
-    const countResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(doctorLeaves)
-      .where(whereClause);
-    
-    const total = Number(countResult[0]?.count || 0);
-
-    // Get vacation updates with doctor info
-    const vacationUpdates = await db
-      .select({
-        id: doctorLeaves.id,
-        doctorId: doctorLeaves.doctorId,
-        leaveType: doctorLeaves.leaveType,
-        startDate: doctorLeaves.startDate,
-        endDate: doctorLeaves.endDate,
-        reason: doctorLeaves.reason,
-        createdAt: doctorLeaves.createdAt,
-        // Doctor info
-        doctorFirstName: sql<string>`(SELECT first_name FROM doctors WHERE id = ${doctorLeaves.doctorId})`,
-        doctorLastName: sql<string>`(SELECT last_name FROM doctors WHERE id = ${doctorLeaves.doctorId})`,
-      })
-      .from(doctorLeaves)
-      .where(whereClause)
-      .orderBy(desc(doctorLeaves.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    // Format response
-    const formattedUpdates = vacationUpdates.map((update) => {
-      const start = new Date(update.startDate);
-      const end = new Date(update.endDate);
-      const durationDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-
-      return {
-        id: update.id,
-        doctorId: update.doctorId,
-        doctorName: `Dr. ${update.doctorFirstName || ''} ${update.doctorLastName || ''}`.trim() || 'Unknown',
-        leaveType: update.leaveType,
-        startDate: update.startDate,
-        endDate: update.endDate,
-        durationDays,
-        reason: update.reason || null,
-        createdAt: update.createdAt,
-      };
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: formattedUpdates,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
+    const result = await new AdminVacationUpdatesService().list({ page, limit, doctorId, leaveType, startDate, endDate });
+    return NextResponse.json({ success: true, data: result.data, pagination: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) } });
   } catch (error) {
     console.error('Error fetching vacation updates:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to fetch vacation updates',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: 'Failed to fetch vacation updates' }, { status: 500 });
   }
 }
-
+export const GET = withAuth(getHandler, ['admin']);
