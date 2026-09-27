@@ -53,6 +53,15 @@ export const HOME_VISIT_PAYMENT_TIMINGS = [
   },
 ] as const;
 
+export const HOME_VISIT_RATING_COPY = {
+  action: 'Rate visit',
+  title: 'Rate your home visit',
+  description: 'How was your experience with the doctor?',
+  submit: 'Submit rating',
+  reviewPlaceholder: 'Share an optional comment',
+  success: 'Thanks for rating your home visit.',
+} as const;
+
 export type HomeVisitPaymentTiming =
   (typeof HOME_VISIT_PAYMENT_TIMINGS)[number]['value'];
 

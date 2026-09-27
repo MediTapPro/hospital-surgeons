@@ -6,6 +6,7 @@ import {
   users,
   assignments,
   homeVisitDetails,
+  assignmentRatings,
   doctors,
   doctorAvailability,
   files,
@@ -279,11 +280,14 @@ export class PatientProfilesRepository {
         slotDate: doctorAvailability.slotDate,
         slotStartTime: doctorAvailability.startTime,
         slotEndTime: doctorAvailability.endTime,
+        ratingId: assignmentRatings.id,
+        rating: assignmentRatings.rating,
       })
       .from(assignments)
       .innerJoin(homeVisitDetails, eq(homeVisitDetails.assignmentId, assignments.id))
       .innerJoin(doctors, eq(doctors.id, assignments.doctorId))
       .leftJoin(doctorAvailability, eq(doctorAvailability.id, assignments.availabilitySlotId))
+      .leftJoin(assignmentRatings, eq(assignmentRatings.assignmentId, assignments.id))
       .where(
         and(
           eq(assignments.patientProfileId, patientProfileId),

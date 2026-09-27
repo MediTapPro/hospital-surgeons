@@ -18,6 +18,7 @@ import {
   Search,
   MessageSquare,
   CreditCard,
+  Star,
   Camera,
   Loader2,
 } from 'lucide-react';
@@ -613,6 +614,15 @@ export default function PatientDashboardPage() {
             </button>
 
             <button
+              type="button"
+              onClick={() => router.push('/patient/reviews')}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+            >
+              <Star className="w-4 h-4" />
+              Doctor Reviews
+            </button>
+
+            <button
               onClick={() => setActiveTab('addresses')}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'addresses'
@@ -814,6 +824,11 @@ export default function PatientDashboardPage() {
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {booking.timeSlot}
                         </span>
+                        {booking.status === 'completed' && (
+                          <button type="button" onClick={() => router.push('/patient/reviews')} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                            <Star className="h-3.5 w-3.5" /> View doctor reviews
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

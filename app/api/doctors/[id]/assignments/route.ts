@@ -24,8 +24,14 @@ import { withAuthAndContext, AuthenticatedRequest } from '@/lib/auth/middleware'
  *         name: status
  *         schema:
  *           type: string
- *           enum: [pending, confirmed, completed, cancelled, all]
+ *           enum: [pending, accepted, declined, completed, cancelled, all]
  *         description: Filter by assignment status
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [patient, hospital, all]
+ *         description: Filter patient home visits or hospital assignments
  *       - in: query
  *         name: search
  *         schema:
@@ -376,4 +382,3 @@ async function getHandler(
 }
 
 export const GET = withAuthAndContext(getHandler, ['doctor', 'admin']);
-
